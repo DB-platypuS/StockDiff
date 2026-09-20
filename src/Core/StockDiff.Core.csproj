@@ -1,0 +1,15 @@
+<!--
+  创建者: PlatyPus
+  创建时间: 2026-09-20
+  作用: 库存差异比对系统核心类库项目文件，定义目标框架与程序集标识，零 UI 依赖。
+-->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>StockDiff.Core</RootNamespace>
+    <AssemblyName>StockDiff.Core</AssemblyName>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+</Project>

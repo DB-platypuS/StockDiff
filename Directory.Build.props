@@ -1,0 +1,17 @@
+<!--
+  创建者: PlatyPus
+  创建时间: 2026-09-20
+  作用: 全解决方案统一的 MSBuild 编译属性（语言版本、可空引用、隐式 using、
+        代码分析器与代码风格开关），集中管理以避免各 csproj 重复声明。
+-->
+<Project>
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>latest</AnalysisLevel>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+  </PropertyGroup>
+</Project>

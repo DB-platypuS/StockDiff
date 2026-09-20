@@ -1,0 +1,12 @@
+# 创建者: PlatyPus
+# 创建时间: 2026-09-20
+# 作用: 声明 Git 忽略的构建产物与本地环境文件（bin/obj/.vs 等），
+#       避免编译产物与个人配置进入版本库。
+
+bin/
+obj/
+.vs/
+*.user
+*.suo
+TestResults/
+publish/
