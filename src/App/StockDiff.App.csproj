@@ -1,0 +1,25 @@
+<!--
+  创建者: PlatyPus
+  创建时间: 2026-09-20
+  作用: WinForms 可执行项目文件，声明 Windows 目标框架、应用清单、DPI 与默认中文字体，
+        并引用 Core 类库；版本号为本程序唯一来源。
+-->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <RootNamespace>StockDiff.App</RootNamespace>
+    <AssemblyName>StockDiff</AssemblyName>
+    <Version>1.0.0</Version>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <ApplicationDefaultFont>Microsoft YaHei UI, 9pt</ApplicationDefaultFont>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Core\StockDiff.Core.csproj" />
+  </ItemGroup>
+
+</Project>
