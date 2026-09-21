@@ -33,6 +33,19 @@ public sealed class MainForm : Form
 
     public void ShowDashboard(string username) => ShowView(new DashboardView(username));
 
+    private void InitializeComponent()
+    {
+        SuspendLayout();
+        // 
+        // MainForm
+        // 
+        ClientSize = new Size(891, 422);
+        Font = new Font("Microsoft YaHei UI", 4F);
+        Name = "MainForm";
+        ResumeLayout(false);
+
+    }
+
     private void ShowView(UserControl view)
     {
         _content.SuspendLayout();
