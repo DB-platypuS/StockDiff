@@ -8,6 +8,7 @@ namespace StockDiff.App.Views;
 
 public sealed class DashboardView : UserControl
 {
+    // 占位主面板：展示欢迎用户名与版本号，筛选栏与数据表格由 F4/F5 填充
     public DashboardView(string username)
     {
         Dock = DockStyle.Fill;

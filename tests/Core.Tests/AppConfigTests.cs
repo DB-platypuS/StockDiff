@@ -13,16 +13,19 @@ public sealed class AppConfigTests
     [InlineData(null)]
     [InlineData("")]
     [InlineData("   ")]
+    // 空白 / 空串 / null 地址统一回退默认地址
     public void NormalizeBaseUrl_Blank_FallsBackToDefault(string? raw) =>
         Assert.Equal(AppConfig.DefaultBaseUrl, AppConfig.NormalizeBaseUrl(raw));
 
     [Theory]
     [InlineData("  http://10.0.0.1:8080  ", "http://10.0.0.1:8080")]
     [InlineData("http://10.0.0.1:8080/", "http://10.0.0.1:8080/")]
+    // 仅裁剪首尾空白，其余内容（含末尾斜杠）保持原样
     public void NormalizeBaseUrl_TrimsOuterWhitespaceOnly(string raw, string expected) =>
         Assert.Equal(expected, AppConfig.NormalizeBaseUrl(raw));
 
     [Fact]
+    // 锁定对外常量的取值契约
     public void Constants_MatchContract()
     {
         Assert.Equal("http://127.0.0.1:7880", AppConfig.DefaultBaseUrl);
@@ -31,6 +34,7 @@ public sealed class AppConfigTests
     }
 
     [Fact]
+    // 锁定三个超时值：登录 20s / 拉取 60s / 连接测试 5s
     public void Timeouts_MatchContract()
     {
         Assert.Equal(TimeSpan.FromSeconds(20), AppConfig.LoginTimeout);
@@ -39,6 +43,7 @@ public sealed class AppConfigTests
     }
 
     [Fact]
+    // 版本号应为语义化版本（x.y.z 开头）
     public void Version_IsNonEmptySemanticVersion() =>
         Assert.Matches(@"^\d+\.\d+\.\d+", AppConfig.Version);
 }

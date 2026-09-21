@@ -8,13 +8,16 @@ using StockDiffRow = StockDiff.Core.Models.StockDiff;
 
 namespace StockDiff.Core.Table;
 
+// 单元格水平对齐方式
 public enum ColumnAlign { Left, Center, Right }
 
+// 单个列定义：表头、列宽、对齐方式与取值函数
 public sealed record TableColumn(
     string Header, int Width, ColumnAlign Align, Func<StockDiffRow, string> Get);
 
 public static class TableColumns
 {
+    // 12 列按显示顺序定义；表格渲染、列宽、单元格取值与 CSV 导出均由此派生
     public static readonly IReadOnlyList<TableColumn> Columns = new[]
     {
         new TableColumn("物料编码", 180, ColumnAlign.Left,  r => r.MaterialCode),
@@ -31,11 +34,14 @@ public static class TableColumns
         new TableColumn("WMS效期",  100, ColumnAlign.Left,  r => r.WmsExpiry),
     };
 
+    // 返回按序排列的表头文本，供 DataGridView 与 CSV 复用
     public static string[] Headers() => Columns.Select(c => c.Header).ToArray();
 
+    // 取第 col 列的对齐方式，下标越界时回退左对齐
     public static ColumnAlign Align(int col) =>
         col >= 0 && col < Columns.Count ? Columns[col].Align : ColumnAlign.Left;
 
+    // 取第 col 列的单元格文本，行对象或下标非法时返回空串
     public static string CellValue(StockDiffRow row, int col) =>
         row is null || col < 0 || col >= Columns.Count ? "" : Columns[col].Get(row);
 }

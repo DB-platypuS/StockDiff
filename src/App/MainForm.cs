@@ -14,6 +14,7 @@ public sealed class MainForm : Form
     private readonly Panel _content = new() { Dock = DockStyle.Fill };
     private readonly ApiClient _client;
 
+    // 构造外壳：设置标题与尺寸 → 加载持久化地址 → 创建唯一 ApiClient → 展示登录页
     public MainForm()
     {
         Text = $"{AppConfig.AppName} v{AppConfig.Version}";
@@ -27,25 +28,16 @@ public sealed class MainForm : Form
         ShowLogin();
     }
 
+    // 全局唯一的 API 客户端，供各视图共享接口地址与登录令牌
     public ApiClient Client => _client;
 
+    // 切换到登录页（未登录 / 退出登录 / 令牌过期时调用）
     public void ShowLogin() => ShowView(new LoginView(this, _client));
 
+    // 登录成功后切换到主面板，username 用于界面展示
     public void ShowDashboard(string username) => ShowView(new DashboardView(username));
 
-    private void InitializeComponent()
-    {
-        SuspendLayout();
-        // 
-        // MainForm
-        // 
-        ClientSize = new Size(891, 422);
-        Font = new Font("Microsoft YaHei UI", 4F);
-        Name = "MainForm";
-        ResumeLayout(false);
-
-    }
-
+    // 视图切换：先释放旧视图，再装载新视图并铺满内容区
     private void ShowView(UserControl view)
     {
         _content.SuspendLayout();

@@ -6,6 +6,7 @@ using System.Text.Json.Serialization;
 
 namespace StockDiff.Core.Models;
 
+// 登录接口响应：code=0 表示成功，data 内含 token
 public sealed class LoginResponse
 {
     [JsonPropertyName("code")]    public int Code { get; set; }
@@ -13,11 +14,13 @@ public sealed class LoginResponse
     [JsonPropertyName("data")]    public LoginData? Data { get; set; }
 }
 
+// 登录成功后的数据体，仅取 token 字段
 public sealed class LoginData
 {
     [JsonPropertyName("token")] public string Token { get; set; } = "";
 }
 
+// 库存差异查询响应：data 为记录列表，可能为空数组
 public sealed class StockDiffResponse
 {
     [JsonPropertyName("code")]    public int Code { get; set; }

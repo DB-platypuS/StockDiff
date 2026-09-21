@@ -8,6 +8,8 @@ namespace StockDiff.Core.Api;
 
 public static class NetworkErrorMapper
 {
+    // 将异常转为用户可读文案：按「URL 错误 → 超时 → 套接字错误」顺序匹配并追加「💡 排查建议」
+    // userCancelled 为真表示用户主动取消，此时不追加超时建议
     public static string Map(Exception ex, bool userCancelled = false)
     {
         var text = ex.Message;
@@ -40,6 +42,7 @@ public static class NetworkErrorMapper
         };
     }
 
+    // 沿 InnerException 链查找 SocketException，用于识别拒连 / DNS 失败等网络根因
     private static SocketException? FindSocket(Exception? ex)
     {
         for (var cur = ex; cur is not null; cur = cur.InnerException)

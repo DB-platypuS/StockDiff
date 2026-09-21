@@ -13,6 +13,7 @@ public sealed class StockDiff
     [JsonPropertyName("material_code")]    public string MaterialCode    { get; set; } = "";
     [JsonPropertyName("diff_type")]        public string DiffType        { get; set; } = "";
     [JsonPropertyName("warehouse_type")]   public string WarehouseType   { get; set; } = "";
+    // 三个数量字段用 JsonElement 保留原始文本，避免大数精度丢失（禁止改为 double）
     [JsonPropertyName("warehouse_qty")]    public JsonElement WarehouseQty { get; set; }
     [JsonPropertyName("wms_qty")]          public JsonElement WmsQty       { get; set; }
     [JsonPropertyName("qty_diff")]         public JsonElement QtyDiff      { get; set; }

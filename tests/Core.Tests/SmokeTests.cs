@@ -11,6 +11,7 @@ namespace Core.Tests;
 public sealed class SmokeTests
 {
     [Fact]
+    // 冒烟：Core 程序集可正常加载，验证测试项目引用链路畅通
     public void CoreAssembly_IsLoadable() =>
         Assert.NotNull(Assembly.Load("StockDiff.Core"));
 
@@ -18,10 +19,12 @@ public sealed class SmokeTests
     [InlineData(null)]
     [InlineData("")]
     [InlineData("   ")]
+    // 冒烟：空白输入回退默认地址
     public void NormalizeBaseUrl_BlankInput_FallsBackToDefault(string? raw) =>
         Assert.Equal(AppConfig.DefaultBaseUrl, AppConfig.NormalizeBaseUrl(raw));
 
     [Fact]
+    // 冒烟：首尾空白被裁剪
     public void NormalizeBaseUrl_TrimsSurroundingWhitespace() =>
         Assert.Equal("http://192.168.13.8:7880", AppConfig.NormalizeBaseUrl("  http://192.168.13.8:7880  "));
 }

@@ -19,43 +19,51 @@ public sealed class ApiClient
     private string _baseUrl;
     private string _token = "";
 
+    // 生产用构造函数：复用静态共享 HttpClient，避免每次请求新建导致端口耗尽
     public ApiClient(string baseUrl)
         : this(baseUrl, SharedHttp)
     {
     }
 
+    // 测试用构造函数：注入自定义 HttpMessageHandler，使单元测试可脱离真实网络
     internal ApiClient(string baseUrl, HttpMessageHandler handler)
         : this(baseUrl, new HttpClient(handler, disposeHandler: false) { Timeout = Timeout.InfiniteTimeSpan })
     {
     }
 
+    // 统一入口：不设全局超时，超时由各方法内的 CancellationTokenSource 控制
     private ApiClient(string baseUrl, HttpClient http)
     {
         _baseUrl = baseUrl;
         _http = http;
     }
 
+    // 接口根地址，读写均加锁，保证 UI 线程与后台线程看到一致值
     public string BaseUrl
     {
         get { lock (_lock) { return _baseUrl; } }
         set { lock (_lock) { _baseUrl = value; } }
     }
 
+    // 当前登录令牌，只读；未登录时为空串
     public string Token
     {
         get { lock (_lock) { return _token; } }
     }
 
+    // 写入登录令牌（null 归一为空串）
     public void SetToken(string token)
     {
         lock (_lock) { _token = token ?? ""; }
     }
 
+    // 清空令牌，退出登录或地址变更时调用
     public void ClearToken()
     {
         lock (_lock) { _token = ""; }
     }
 
+    // 仅当当前令牌与传入值一致时才清空，防止旧请求的 401 抹掉新会话令牌
     public void ClearTokenIf(string oldToken)
     {
         lock (_lock)
@@ -67,6 +75,8 @@ public sealed class ApiClient
         }
     }
 
+    // 登录：校验入参 → 20 秒超时 → POST /api/v1/auth/login → 校验业务码与 token → 写入并返回 token
+    // 失败统一抛 ApiException（网络类经 NetworkErrorMapper 附加排查建议）；空入参或非法地址另抛对应异常
     public async Task<string> LoginAsync(string username, string password, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(password))
@@ -77,49 +87,26 @@ public sealed class ApiClient
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         cts.CancelAfter(AppConfig.LoginTimeout);
 
-        var body = JsonSerializer.Serialize(new LoginRequest(username.Trim(), password));
-        using var content = new StringContent(body, Encoding.UTF8, "application/json");
+        var loginUrl = FullUrl("/auth/login");
+        if (!Uri.TryCreate(loginUrl, UriKind.Absolute, out _))
+        {
+            throw new ApiException(NetworkErrorMapper.Map(new UriFormatException()));
+        }
 
-        HttpResponseMessage response;
         try
         {
-            response = await _http.PostAsync(FullUrl("/auth/login"), content, cts.Token).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException ex) when (!ct.IsCancellationRequested)
-        {
-            throw new ApiException(NetworkErrorMapper.Map(ex), ex);
-        }
-        catch (HttpRequestException ex)
-        {
-            throw new ApiException(NetworkErrorMapper.Map(ex), ex);
-        }
-        catch (UriFormatException ex)
-        {
-            throw new ApiException(NetworkErrorMapper.Map(ex), ex);
-        }
+            var body = JsonSerializer.Serialize(new LoginRequest(username.Trim(), password));
+            using var content = new StringContent(body, Encoding.UTF8, "application/json");
+            using var response = await _http.PostAsync(loginUrl, content, cts.Token).ConfigureAwait(false);
 
-        using (response)
-        {
             if ((int)response.StatusCode != 200)
             {
                 throw new ApiException($"登录失败: HTTP {(int)response.StatusCode}");
             }
 
-            LoginResponse? parsed;
-            try
-            {
-                var json = await response.Content.ReadAsStringAsync(cts.Token).ConfigureAwait(false);
-                parsed = JsonSerializer.Deserialize<LoginResponse>(json);
-            }
-            catch (JsonException ex)
-            {
-                throw new ApiException("登录失败: 响应解析失败", ex);
-            }
-
-            if (parsed is null)
-            {
-                throw new ApiException("登录失败: 响应为空");
-            }
+            var json = await response.Content.ReadAsStringAsync(cts.Token).ConfigureAwait(false);
+            var parsed = JsonSerializer.Deserialize<LoginResponse>(json)
+                ?? throw new ApiException("登录失败: 响应为空");
 
             if (parsed.Code != 0)
             {
@@ -137,11 +124,25 @@ public sealed class ApiClient
             SetToken(token);
             return token;
         }
+        catch (JsonException ex)
+        {
+            throw new ApiException("登录失败: 响应解析失败", ex);
+        }
+        catch (OperationCanceledException ex) when (!ct.IsCancellationRequested)
+        {
+            throw new ApiException(NetworkErrorMapper.Map(ex), ex);
+        }
+        catch (HttpRequestException ex)
+        {
+            throw new ApiException(NetworkErrorMapper.Map(ex), ex);
+        }
     }
 
+    // 拼接完整 URL：先去掉 BaseUrl 末尾斜杠，避免出现双斜杠
     private string FullUrl(string path) => BaseUrl.TrimEnd('/') + AppConfig.ApiPrefix + path;
 }
 
+// 登录请求体：JSON 字段固定为小写 username / password，与后端契约一致
 internal sealed record LoginRequest(
     [property: JsonPropertyName("username")] string Username,
     [property: JsonPropertyName("password")] string Password);
