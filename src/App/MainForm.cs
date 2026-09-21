@@ -13,6 +13,7 @@ public sealed class MainForm : Form
 {
     private readonly Panel _content = new() { Dock = DockStyle.Fill };
     private readonly ApiClient _client;
+    private readonly AppSettingsStore _settingsStore = new();
 
     // 构造外壳：设置标题与尺寸 → 加载持久化地址 → 创建唯一 ApiClient → 展示登录页
     public MainForm()
@@ -32,7 +33,7 @@ public sealed class MainForm : Form
     public ApiClient Client => _client;
 
     // 切换到登录页（未登录 / 退出登录 / 令牌过期时调用）
-    public void ShowLogin() => ShowView(new LoginView(this, _client));
+    public void ShowLogin() => ShowView(new LoginView(this, _client, _settingsStore));
 
     // 登录成功后切换到主面板，username 用于界面展示
     public void ShowDashboard(string username) => ShowView(new DashboardView(username));

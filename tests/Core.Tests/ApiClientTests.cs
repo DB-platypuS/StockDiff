@@ -232,6 +232,77 @@ public sealed class ApiClientTests
         Assert.Contains("URL错误", ex.Message);
     }
 
+    [Fact]
+    // 边界：BaseUrl 读写原样往返（含末尾斜杠）
+    public void BaseUrl_RoundTripsThroughSetter()
+    {
+        var client = NewClient(new StubHandler(_ => Json(HttpStatusCode.OK, "{}")), "http://10.0.0.1:8080/");
+
+        Assert.Equal("http://10.0.0.1:8080/", client.BaseUrl);
+
+        client.BaseUrl = "http://10.0.0.2:9090";
+
+        Assert.Equal("http://10.0.0.2:9090", client.BaseUrl);
+    }
+
+    [Fact]
+    // 边界：令牌初始为空串
+    public void Token_InitiallyEmpty() =>
+        Assert.Equal("", NewClient(new StubHandler(_ => Json(HttpStatusCode.OK, "{}"))).Token);
+
+    [Fact]
+    // 边界：SetToken(null) 归一为空串，Token 永不返回 null
+    public void SetToken_Null_BecomesEmpty()
+    {
+        var client = NewClient(new StubHandler(_ => Json(HttpStatusCode.OK, "{}")));
+
+        client.SetToken(null!);
+
+        Assert.Equal("", client.Token);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.Unauthorized, 401)]
+    [InlineData(HttpStatusCode.Forbidden, 403)]
+    // 异常：登录接口返回 401/403 时抛 ApiException（登录阶段不涉及会话失效处理）
+    public async Task LoginAsync_UnauthorizedStatus_ThrowsApiException(HttpStatusCode status, int code)
+    {
+        var client = NewClient(new StubHandler(_ => Json(status, "{}")));
+
+        var ex = await Assert.ThrowsAsync<ApiException>(() => client.LoginAsync("000", "0000"));
+
+        Assert.Contains($"HTTP {code}", ex.Message);
+    }
+
+    [Fact]
+    // 正常流程：登录请求不携带 Authorization 头（此时尚未拿到令牌）
+    public async Task LoginAsync_OmitsAuthorizationHeader()
+    {
+        var handler = new StubHandler(_ => Json(HttpStatusCode.OK,
+            """{"code":0,"message":"success","data":{"token":"T"}}"""));
+        var client = NewClient(handler);
+
+        await client.LoginAsync("000", "0000");
+
+        Assert.Null(handler.LastRequest!.Headers.Authorization);
+    }
+
+    [Fact]
+    // 并发：多线程同时读写令牌不应抛异常，最终值只可能是空串或写入值
+    public void Token_ConcurrentAccess_StaysConsistent()
+    {
+        var client = NewClient(new StubHandler(_ => Json(HttpStatusCode.OK, "{}")));
+
+        Parallel.For(0, 500, _ =>
+        {
+            client.SetToken("A");
+            client.ClearTokenIf("A");
+            Assert.NotNull(client.Token);
+        });
+
+        Assert.Contains(client.Token, new[] { "", "A" });
+    }
+
     // 测试替身：拦截请求并保留最近一次的请求对象与请求体，供断言使用
     private sealed class StubHandler : HttpMessageHandler
     {

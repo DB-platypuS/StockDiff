@@ -20,10 +20,18 @@ public sealed class LoginData
     [JsonPropertyName("token")] public string Token { get; set; } = "";
 }
 
-// 库存差异查询响应：data 为记录列表，可能为空数组
+// 库存差异查询响应：data 为记录列表；后端返回 null 时归零为空列表，保证调用方无需判空
 public sealed class StockDiffResponse
 {
+    private List<StockDiffRow> _data = new();
+
     [JsonPropertyName("code")]    public int Code { get; set; }
     [JsonPropertyName("message")] public string Message { get; set; } = "";
-    [JsonPropertyName("data")]    public List<StockDiff> Data { get; set; } = new();
+
+    [JsonPropertyName("data")]
+    public List<StockDiffRow> Data
+    {
+        get => _data;
+        set => _data = value ?? new();
+    }
 }

@@ -4,30 +4,23 @@
 
 using System.Diagnostics;
 using System.Drawing.Drawing2D;
+using StockDiff.App.Dialogs;
 using StockDiff.Core.Api;
+using StockDiff.Core.Config;
 
 namespace StockDiff.App.Views;
 
 public sealed class LoginView : UserControl
 {
-    private static readonly Color Canvas = Color.FromArgb(244, 245, 247);
-    private static readonly Color Accent = Color.FromArgb(47, 111, 237);
-    private static readonly Color AccentHover = Color.FromArgb(37, 89, 199);
-    private static readonly Color Ink = Color.FromArgb(31, 35, 41);
-    private static readonly Color Muted = Color.FromArgb(138, 144, 153);
-    private static readonly Color Subtle = Color.FromArgb(70, 76, 84);
-    private static readonly Color Line = Color.FromArgb(227, 230, 235);
-    private static readonly Color Error = Color.FromArgb(214, 69, 69);
-
-    private static readonly Font AddressFont = new("Microsoft YaHei UI", 8.5F);
-    private static readonly Font BodyFont = new("Microsoft YaHei UI", 9F);
-    private static readonly Font TitleFont = new("Microsoft YaHei UI", 17F, FontStyle.Bold);
-    private static readonly Font PrimaryButtonFont = new("Microsoft YaHei UI", 10F, FontStyle.Bold);
+    // 卡片与输入框宽度、内边距统一，避免多处硬编码
+    private const int InputWidth = 336;
+    private const int CardPadding = 32;
 
     private readonly MainForm _mainForm;
     private readonly ApiClient _client;
+    private readonly IBaseUrlStore _store;
 
-    private readonly Label _addressValue = new() { AutoSize = true, ForeColor = Muted };
+    private readonly Label _addressValue = new() { AutoSize = true, ForeColor = Theme.Muted };
     private readonly TextBox _userBox = new()
     {
         BorderStyle = BorderStyle.None,
@@ -44,27 +37,31 @@ public sealed class LoginView : UserControl
     private readonly Button _loginButton = new() { Text = "登 录", Height = 40, Dock = DockStyle.Top };
     private readonly Button _testButton = new() { Text = "测试连接", Size = new Size(88, 32), Margin = new Padding(0, 0, 10, 0) };
     private readonly Button _settingsButton = new() { Text = "API 设置", Size = new Size(88, 32), Margin = new Padding(0) };
-    private readonly Label _statusLabel = new() { AutoSize = true, ForeColor = Muted };
+    private readonly Label _statusLabel = new() { AutoSize = true, ForeColor = Theme.Muted };
+
+    // 登录请求取消源：视图被销毁（登录成功切主面板 / 关闭窗口）时取消在途请求
+    private readonly CancellationTokenSource _loginCts = new();
 
     // 构建登录页：铺底色 → 卡片居中 → 绑定登录按钮与两个占位按钮事件
-    public LoginView(MainForm mainForm, ApiClient client)
+    public LoginView(MainForm mainForm, ApiClient client, IBaseUrlStore store)
     {
         _mainForm = mainForm;
         _client = client;
+        _store = store;
 
         Dock = DockStyle.Fill;
-        BackColor = Canvas;
+        BackColor = Theme.Canvas;
         _addressValue.Text = $"接口地址    {client.BaseUrl}";
-        _addressValue.Font = AddressFont;
-        _statusLabel.Font = BodyFont;
+        _addressValue.Font = Theme.AddressFont;
+        _statusLabel.Font = Theme.BodyFont;
         _loginButton.Margin = new Padding(0, 8, 0, 0);
 
-        StylePrimary(_loginButton);
-        StyleSecondary(_testButton);
-        StyleSecondary(_settingsButton);
+        Theme.StylePrimary(_loginButton, Theme.LoginButtonFont);
+        Theme.StyleSecondary(_testButton, Theme.BodyFont, wideHitArea: true);
+        Theme.StyleSecondary(_settingsButton, Theme.BodyFont, wideHitArea: true);
 
         var card = BuildCard();
-        var host = new Panel { Dock = DockStyle.Fill, BackColor = Canvas };
+        var host = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Canvas };
         host.Controls.Add(card);
         host.Resize += (_, _) => CenterCard(host, card);
         Controls.Add(host);
@@ -72,7 +69,7 @@ public sealed class LoginView : UserControl
 
         _loginButton.Click += OnLoginClick;
         _testButton.Click += (_, _) => ShowComingSoon("测试连接");
-        _settingsButton.Click += (_, _) => ShowComingSoon("API 设置");
+        _settingsButton.Click += OnSettingsClick;
         _userBox.TextChanged += (_, _) => SetStatus("");
         _passwordBox.TextChanged += (_, _) => SetStatus("");
     }
@@ -88,7 +85,7 @@ public sealed class LoginView : UserControl
             ColumnCount = 1,
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            Width = 336,
+            Width = InputWidth,
             BackColor = Color.Transparent
         };
 
@@ -104,10 +101,10 @@ public sealed class LoginView : UserControl
         inner.Controls.Add(CreateActions());
         inner.Controls.Add(_statusLabel);
 
-        inner.Location = new Point(32, 32);
+        inner.Location = new Point(CardPadding, CardPadding);
         card.Controls.Add(inner);
         var preferred = inner.PreferredSize;
-        card.Size = new Size(preferred.Width + 64, preferred.Height + 64);
+        card.Size = new Size(preferred.Width + CardPadding * 2, preferred.Height + CardPadding * 2);
         return card;
     }
 
@@ -117,8 +114,8 @@ public sealed class LoginView : UserControl
         host.Controls.Add(new Label
         {
             Text = "库存差异比对系统",
-            Font = TitleFont,
-            ForeColor = Ink,
+            Font = Theme.PageTitleFont,
+            ForeColor = Theme.Ink,
             AutoSize = true,
             Margin = new Padding(0, 0, 0, 6)
         });
@@ -126,8 +123,8 @@ public sealed class LoginView : UserControl
         host.Controls.Add(new Label
         {
             Text = "请使用工号与密码登录",
-            Font = BodyFont,
-            ForeColor = Muted,
+            Font = Theme.BodyFont,
+            ForeColor = Theme.Muted,
             AutoSize = true,
             Margin = new Padding(0, 0, 0, 16)
         });
@@ -137,8 +134,8 @@ public sealed class LoginView : UserControl
     private static Panel CreateDivider() => new()
     {
         Height = 1,
-        Width = 336,
-        BackColor = Line,
+        Width = InputWidth,
+        BackColor = Theme.Line,
         Margin = new Padding(0, 0, 0, 18)
     };
 
@@ -160,54 +157,30 @@ public sealed class LoginView : UserControl
     // 用圆角边框容器包裹无边框输入框，自绘浅灰描边以获得现代输入框外观
     private static Panel MakeInput(TextBox box)
     {
-        var wrap = new Panel
-        {
-            Height = 38,
-            Width = 336,
-            BackColor = Color.White,
-            Padding = new Padding(10, 9, 10, 9),
-            Margin = new Padding(0, 0, 0, 12)
-        };
-        wrap.Paint += (_, e) =>
-        {
-            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-            using var pen = new Pen(Line);
-            using var path = RoundRect(new Rectangle(0, 0, wrap.Width - 1, wrap.Height - 1), 6);
-            e.Graphics.DrawPath(pen, path);
-        };
-        wrap.Controls.Add(box);
+        var wrap = Theme.WrapInput(box, new Padding(10, 9, 10, 9));
+        wrap.Height = 38;
+        wrap.Width = InputWidth;
+        wrap.Margin = new Padding(0, 0, 0, 12);
         return wrap;
     }
 
-    // 主按钮样式：蓝色实底、无边框、悬停加深，用于「登录」
-    private static void StylePrimary(Button button)
+    // 「API 设置」：打开接口地址对话框；保存成功后刷新地址展示并提示重新登录
+    // （地址已由 BaseUrlSetter 落盘并清空令牌，此处只负责界面反馈）
+    private void OnSettingsClick(object? sender, EventArgs e)
     {
-        button.FlatStyle = FlatStyle.Flat;
-        button.FlatAppearance.BorderSize = 0;
-        button.FlatAppearance.MouseOverBackColor = AccentHover;
-        button.FlatAppearance.MouseDownBackColor = AccentHover;
-        button.BackColor = Accent;
-        button.ForeColor = Color.White;
-        button.Font = PrimaryButtonFont;
-        button.Cursor = Cursors.Hand;
+        using var dialog = new SettingsForm(_client, _store);
+        dialog.ShowDialog(this);
+
+        if (!dialog.Saved)
+        {
+            return;
+        }
+
+        _addressValue.Text = $"接口地址    {_client.BaseUrl}";
+        SetStatus("接口地址已更新，请重新登录");
     }
 
-    // 次要按钮样式：白底细边框、悬停浅灰，用于「测试连接」「API 设置」
-    private static void StyleSecondary(Button button)
-    {
-        button.FlatStyle = FlatStyle.Flat;
-        button.FlatAppearance.BorderSize = 1;
-        button.FlatAppearance.BorderColor = Line;
-        button.FlatAppearance.MouseOverBackColor = Color.FromArgb(246, 247, 249);
-        button.BackColor = Color.White;
-        button.ForeColor = Subtle;
-        button.Font = BodyFont;
-        button.Padding = new Padding(14, 0, 14, 0);
-        button.TextAlign = ContentAlignment.MiddleCenter;
-        button.Cursor = Cursors.Hand;
-    }
-
-    // F1 占位：提示该功能将在后续版本提供（真实逻辑分别属于 F3 / F2）
+    // F3 占位：提示该功能将在后续版本提供（真实逻辑属于 F3）
     private void ShowComingSoon(string feature)
     {
         SetStatus($"{feature}功能将在后续版本提供");
@@ -255,7 +228,7 @@ public sealed class LoginView : UserControl
             }
 
             var previous = Region;
-            using var path = RoundRect(new Rectangle(0, 0, Width - 1, Height - 1), 12);
+            using var path = Theme.RoundRect(new Rectangle(0, 0, Width - 1, Height - 1), 12);
             Region = new Region(path);
             previous?.Dispose();
         }
@@ -270,8 +243,8 @@ public sealed class LoginView : UserControl
             }
 
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-            using var path = RoundRect(new Rectangle(0, 0, Width - 1, Height - 1), 12);
-            using var pen = new Pen(Line);
+            using var path = Theme.RoundRect(new Rectangle(0, 0, Width - 1, Height - 1), 12);
+            using var pen = new Pen(Theme.Line);
             e.Graphics.DrawPath(pen, path);
         }
     }
@@ -285,7 +258,7 @@ public sealed class LoginView : UserControl
 
         if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(password))
         {
-            SetStatus("请输入账号和密码", Error);
+            SetStatus("请输入账号和密码", Theme.Error);
             return;
         }
 
@@ -294,19 +267,35 @@ public sealed class LoginView : UserControl
 
         try
         {
-            await _client.LoginAsync(username, password);
+            await _client.LoginAsync(username, password, _loginCts.Token);
             _mainForm.ShowDashboard(username);
+        }
+        catch (OperationCanceledException)
+        {
+            // 视图已销毁导致的主动取消，属预期流程，不提示用户
+            Trace.WriteLine("[登录] 请求已取消（视图已关闭）");
         }
         catch (Exception ex)
         {
             Trace.WriteLine($"[登录] 失败: {ex}");
-            SetStatus("登录失败", Error);
+            SetStatus("登录失败", Theme.Error);
             MessageBox.Show(this, ex.Message, "登录失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
         finally
         {
             SetBusy(false);
         }
+    }
+
+    // 销毁视图时取消在途登录请求；只取消不 Dispose，避免与在途请求的令牌注册产生释放竞态
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _loginCts.Cancel();
+        }
+
+        base.Dispose(disposing);
     }
 
     // 登录期间禁用输入与按钮并切换等待光标，防止重复提交
@@ -334,6 +323,6 @@ public sealed class LoginView : UserControl
         }
 
         _statusLabel.Text = text;
-        _statusLabel.ForeColor = color ?? Muted;
+        _statusLabel.ForeColor = color ?? Theme.Muted;
     }
 }

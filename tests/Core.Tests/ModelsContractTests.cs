@@ -58,10 +58,21 @@ public sealed class ModelsContractTests
     }
 
     [Fact]
-    public void NullData_DeserializesToNull_NotInitializedList()
+    // P0-3：data 为 null 时归零为空列表，调用方无需判空即可安全使用
+    public void NullData_CoercesToEmptyList()
     {
         var resp = JsonSerializer.Deserialize<StockDiffResponse>("""{"code":0,"message":"ok","data":null}""")!;
 
-        Assert.Null(resp.Data);
+        Assert.NotNull(resp.Data);
+        Assert.Empty(resp.Data);
+    }
+
+    [Fact]
+    // P0-3：data 字段整体缺失时同样为空列表
+    public void MissingDataField_CoercesToEmptyList()
+    {
+        var resp = JsonSerializer.Deserialize<StockDiffResponse>("""{"code":0}""")!;
+
+        Assert.Empty(resp.Data);
     }
 }

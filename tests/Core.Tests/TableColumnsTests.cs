@@ -3,8 +3,8 @@
 // 作用: TableColumns 单元测试，锁定 12 列的名称、顺序、宽度与对齐规则，并校验取值与边界兜底。
 
 using System.Text.Json;
+using StockDiff.Core.Models;
 using StockDiff.Core.Table;
-using StockDiffRow = StockDiff.Core.Models.StockDiff;
 using Xunit;
 
 namespace Core.Tests;

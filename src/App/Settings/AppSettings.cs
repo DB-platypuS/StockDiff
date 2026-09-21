@@ -36,6 +36,16 @@ public static class AppSettings
         }
     }
 
+    // 显式设置地址并落盘，返回是否成功持久化；失败时内存值仍生效，由调用方提示用户
+    public static bool TrySetBaseUrl(string value)
+    {
+        lock (Lock)
+        {
+            _baseUrl = AppConfig.NormalizeBaseUrl(value);
+            return Save();
+        }
+    }
+
     // 启动时载入一次地址配置
     public static void Load()
     {
@@ -45,12 +55,11 @@ public static class AppSettings
         }
     }
 
-    // 解析优先级：环境变量 > 本地持久化；均无值时返回 null，由 BaseUrl 的 getter 兜底默认地址
-    private static string? ResolvePersistedOrEnv()
-    {
-        var fromEnv = Environment.GetEnvironmentVariable(AppConfig.BaseUrlEnvVar);
-        return string.IsNullOrWhiteSpace(fromEnv) ? ReadPersisted() : fromEnv.Trim();
-    }
+    // 解析启动地址：本地持久化（用户显式设置）优先于环境变量；均无值时返回 null，
+    // 由 BaseUrl 的 getter 兜底默认地址。优先级规则统一由 Core 的 BaseUrlSetter 承载。
+    private static string? ResolvePersistedOrEnv() =>
+        BaseUrlSetter.ResolveStartupBaseUrl(
+            ReadPersisted(), Environment.GetEnvironmentVariable(AppConfig.BaseUrlEnvVar));
 
     // 读取本地配置；文件不存在或内容损坏时返回 null 并记录日志
     private static string? ReadPersisted()
@@ -73,7 +82,8 @@ public static class AppSettings
     }
 
     // 原子写：先写 settings.json.tmp，再用 File.Move 覆盖，避免进程被强杀时留下半截文件
-    private static void Save()
+    // 返回是否写入成功；失败时记录日志并返回 false，由调用方决定是否提示用户
+    private static bool Save()
     {
         try
         {
@@ -82,10 +92,12 @@ public static class AppSettings
             var temp = SettingsFile + ".tmp";
             File.WriteAllText(temp, json, Encoding.UTF8);
             File.Move(temp, SettingsFile, overwrite: true);
+            return true;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             Trace.WriteLine($"[设置] 保存失败: {ex.Message}");
+            return false;
         }
     }
 

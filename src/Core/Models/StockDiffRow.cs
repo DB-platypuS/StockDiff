@@ -8,7 +8,7 @@ using System.Text.Json.Serialization;
 
 namespace StockDiff.Core.Models;
 
-public sealed class StockDiff
+public sealed class StockDiffRow
 {
     [JsonPropertyName("material_code")]    public string MaterialCode    { get; set; } = "";
     [JsonPropertyName("diff_type")]        public string DiffType        { get; set; } = "";

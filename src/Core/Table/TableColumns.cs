@@ -1,10 +1,8 @@
 // 创建者: PlatyPus
 // 创建时间: 2026-09-20
 // 作用: 表格列定义单一数据源，表格渲染、列宽、单元格取值与 CSV 导出均由 Columns 派生。
-// 说明: 实体类 StockDiff 与根命名空间 StockDiff 同名，此处以别名 StockDiffRow 引用类型。
-
 using StockDiff.Core.Convert;
-using StockDiffRow = StockDiff.Core.Models.StockDiff;
+using StockDiff.Core.Models;
 
 namespace StockDiff.Core.Table;
 
@@ -34,8 +32,11 @@ public static class TableColumns
         new TableColumn("WMS效期",  100, ColumnAlign.Left,  r => r.WmsExpiry),
     };
 
+    // 表头缓存：避免每次调用重复 LINQ 投影；对外返回新数组，防止调用方修改共享状态
+    private static readonly string[] HeaderCache = Columns.Select(c => c.Header).ToArray();
+
     // 返回按序排列的表头文本，供 DataGridView 与 CSV 复用
-    public static string[] Headers() => Columns.Select(c => c.Header).ToArray();
+    public static string[] Headers() => (string[])HeaderCache.Clone();
 
     // 取第 col 列的对齐方式，下标越界时回退左对齐
     public static ColumnAlign Align(int col) =>

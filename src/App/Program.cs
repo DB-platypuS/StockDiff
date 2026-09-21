@@ -32,7 +32,10 @@ internal static class Program
                 "logs");
             Directory.CreateDirectory(dir);
 
-            var writer = new StreamWriter(Path.Combine(dir, "app.log"), append: true) { AutoFlush = true };
+            var logFile = Path.Combine(dir, "app.log");
+            RotateIfTooLarge(logFile);
+
+            var writer = new StreamWriter(logFile, append: true) { AutoFlush = true };
             Trace.Listeners.Add(new TextWriterTraceListener(writer));
             Trace.AutoFlush = true;
         }
@@ -40,6 +43,21 @@ internal static class Program
         {
             Trace.WriteLine($"[启动] 日志文件初始化失败: {ex.Message}");
         }
+    }
+
+    // 日志单文件上限 2MB，超出则归档为 app.log.1 后重新开始，避免长期运行无限增长
+    private const long MaxLogBytes = 2 * 1024 * 1024;
+
+    // 日志超过上限时轮转：保留上一周期为 app.log.1，旧归档直接覆盖
+    private static void RotateIfTooLarge(string logFile)
+    {
+        var info = new FileInfo(logFile);
+        if (!info.Exists || info.Length < MaxLogBytes)
+        {
+            return;
+        }
+
+        File.Move(logFile, logFile + ".1", overwrite: true);
     }
 
     // 记录未捕获异常并提示用户，避免 Release 版崩溃后无日志可查
