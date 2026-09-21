@@ -1,0 +1,22 @@
+
+# 创建者: PlatyPus
+
+# 创建时间: 2026-09-20
+
+# 作用: 统一换行符与文本属性，与 .editorconfig 的 end_of_line = crlf 保持一致，
+
+#       避免跨平台协作时换行符被反复改写、产生无意义 diff。
+
+* text=auto eol=crlf
+
+*.cs     text diff=csharp
+*.csproj text
+*.props  text
+*.slnx   text
+*.ps1    text
+*.md     text
+*.json   text
+
+*.png binary
+*.ico binary
+*.jpg binary

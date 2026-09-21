@@ -7,4 +7,4 @@ $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 dotnet restore StockDiff.slnx
 dotnet build StockDiff.slnx -c Debug --no-restore
-dotnet run --project src\APP\StockDiff.App.csproj -c Debug --no-build
+dotnet run --project src\App\StockDiff.App.csproj -c Debug --no-build

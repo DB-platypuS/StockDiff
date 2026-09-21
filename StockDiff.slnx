@@ -1,7 +1,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/Core/StockDiff.Core.csproj" />
-    <Project Path="src/APP/StockDiff.App.csproj" />
+    <Project Path="src/App/StockDiff.App.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Core.Tests/Core.Tests.csproj" />
