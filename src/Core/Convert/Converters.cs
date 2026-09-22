@@ -8,20 +8,25 @@ namespace StockDiff.Core.Convert;
 
 public static class Converters
 {
+    // 仓库中文标签口径唯一定义：UI 与 CSV 导出统一引用常量，避免同一字面量在多处重复
+    public const string LabelAll = "全部";
+    public const string LabelFc = "方仓";
+    public const string LabelAsrs = "立库";
+
     public static string WarehouseLabelFromCode(string? code) => (code ?? "").ToLowerInvariant() switch
     {
-        "fc"   => "方仓",
-        "asrs" => "立库",
-        "all"  => "全部",
-        _      => "全部"
+        "fc"   => LabelFc,
+        "asrs" => LabelAsrs,
+        "all"  => LabelAll,
+        _      => LabelAll
     };
 
     public static string WarehouseCodeFromLabel(string? label) => (label ?? "") switch
     {
-        "方仓" => "fc",
-        "立库" => "asrs",
-        "全部" => "all",
-        _      => "all"
+        LabelFc   => "fc",
+        LabelAsrs => "asrs",
+        LabelAll  => "all",
+        _         => "all"
     };
 
     public static string NumberToString(JsonElement n) => n.ValueKind switch

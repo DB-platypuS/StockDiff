@@ -76,12 +76,11 @@ public sealed class SettingsForm : Form
         Controls.Add(_cancelButton);
     }
 
-    // 圆角描边容器包裹无边框输入框，与登录页输入框外观保持一致
+    // 圆角描边容器包裹无边框输入框，与登录页输入框外观保持一致（共享 Theme.MakeInput 工厂）
     private static Panel MakeInput(TextBox box, Point location, Size size)
     {
-        var wrap = Theme.WrapInput(box, new Padding(10, 8, 10, 8));
+        var wrap = Theme.MakeInput(box, new Padding(10, 8, 10, 8), size, Padding.Empty);
         wrap.Location = location;
-        wrap.Size = size;
         return wrap;
     }
 
@@ -122,15 +121,7 @@ public sealed class SettingsForm : Form
         DialogResult = DialogResult.Cancel;
     }
 
-    // 状态行文案与颜色；已释放时跳过
-    private void SetStatus(string text, Color? color = null)
-    {
-        if (IsDisposed)
-        {
-            return;
-        }
-
-        _statusLabel.Text = text;
-        _statusLabel.ForeColor = color ?? Theme.Muted;
-    }
+    // 状态行文案与颜色，具体实现收口在 UiHelper
+    private void SetStatus(string text, Color? color = null) =>
+        UiHelper.SetStatus(_statusLabel, text, color);
 }

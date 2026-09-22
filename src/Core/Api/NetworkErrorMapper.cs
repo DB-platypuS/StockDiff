@@ -8,6 +8,9 @@ namespace StockDiff.Core.Api;
 
 public static class NetworkErrorMapper
 {
+    // URL 格式错误时的统一文案：无法构造异常实例的场合（如发送前预校验）可直接引用
+    public const string UrlHint = "💡 URL错误，请检查接口地址配置";
+
     // 将异常转为用户可读文案：按「URL 错误 → 超时 → 套接字错误」顺序匹配并追加「💡 排查建议」
     // userCancelled 为真表示用户主动取消，此时不追加超时建议
     public static string Map(Exception ex, bool userCancelled = false)
@@ -16,7 +19,7 @@ public static class NetworkErrorMapper
 
         if (ex is UriFormatException)
         {
-            return "💡 URL错误，请检查接口地址配置";
+            return UrlHint;
         }
 
         if (ex is TaskCanceledException or OperationCanceledException or TimeoutException)

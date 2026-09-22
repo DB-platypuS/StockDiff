@@ -245,7 +245,7 @@ public sealed class ApiClient
     {
         if (!Uri.TryCreate(url, UriKind.Absolute, out _))
         {
-            throw new ApiException(NetworkErrorMapper.Map(new UriFormatException()));
+            throw new ApiException(NetworkErrorMapper.UrlHint);
         }
     }
 

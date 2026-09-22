@@ -154,15 +154,9 @@ public sealed class LoginView : UserControl
         return actions;
     }
 
-    // 用圆角边框容器包裹无边框输入框，自绘浅灰描边以获得现代输入框外观
-    private static Panel MakeInput(TextBox box)
-    {
-        var wrap = Theme.WrapInput(box, new Padding(10, 9, 10, 9));
-        wrap.Height = 38;
-        wrap.Width = InputWidth;
-        wrap.Margin = new Padding(0, 0, 0, 12);
-        return wrap;
-    }
+    // 登录页输入框：统一宽度与下边距，圆角描边外观由 Theme 统一提供
+    private static Panel MakeInput(TextBox box) =>
+        Theme.MakeInput(box, new Padding(10, 9, 10, 9), new Size(InputWidth, 38), new Padding(0, 0, 0, 12));
 
     // 「API 设置」：打开接口地址对话框；保存成功后刷新地址展示并提示重新登录
     // （地址已由 BaseUrlSetter 落盘并清空令牌，此处只负责界面反馈）
@@ -307,31 +301,11 @@ public sealed class LoginView : UserControl
         base.Dispose(disposing);
     }
 
-    // 登录期间禁用输入与按钮并切换等待光标，防止重复提交
-    private void SetBusy(bool busy)
-    {
-        if (IsDisposed)
-        {
-            return;
-        }
+    // 登录期间禁用输入与按钮并切换等待光标，防止重复提交（实现收口在 UiHelper）
+    private void SetBusy(bool busy) =>
+        UiHelper.SetBusy(this, busy, this, _loginButton, _testButton, _settingsButton, _userBox, _passwordBox);
 
-        _loginButton.Enabled = !busy;
-        _testButton.Enabled = !busy;
-        _settingsButton.Enabled = !busy;
-        _userBox.Enabled = !busy;
-        _passwordBox.Enabled = !busy;
-        Cursor = busy ? Cursors.WaitCursor : Cursors.Default;
-    }
-
-    // 更新状态文字与颜色；视图已销毁时直接返回，避免访问已释放控件
-    private void SetStatus(string text, Color? color = null)
-    {
-        if (IsDisposed)
-        {
-            return;
-        }
-
-        _statusLabel.Text = text;
-        _statusLabel.ForeColor = color ?? Theme.Muted;
-    }
+    // 更新状态文字与颜色，具体实现收口在 UiHelper
+    private void SetStatus(string text, Color? color = null) =>
+        UiHelper.SetStatus(_statusLabel, text, color);
 }

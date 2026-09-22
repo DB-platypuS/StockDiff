@@ -79,6 +79,15 @@ internal static class Theme
         return wrap;
     }
 
+    // 统一输入框外框工厂：以相同内边距包装无边框输入框，并指定外框尺寸与边距
+    public static Panel MakeInput(TextBox box, Padding innerPadding, Size size, Padding margin)
+    {
+        var wrap = WrapInput(box, innerPadding);
+        wrap.Size = size;
+        wrap.Margin = margin;
+        return wrap;
+    }
+
     // 构造圆角矩形路径，供卡片与输入框的圆角绘制复用
     public static GraphicsPath RoundRect(Rectangle r, int radius)
     {

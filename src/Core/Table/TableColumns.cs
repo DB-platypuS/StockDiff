@@ -42,7 +42,8 @@ public static class TableColumns
     public static ColumnAlign Align(int col) =>
         col >= 0 && col < Columns.Count ? Columns[col].Align : ColumnAlign.Left;
 
-    // 取第 col 列的单元格文本，行对象或下标非法时返回空串
+    // 取第 col 列的单元格文本，行对象或下标非法时返回空串；
+    // 字段在 JSON 中显式为 null 时同样归零为空串，保证返回值满足非空契约（下游表格/导出无需判空）
     public static string CellValue(StockDiffRow row, int col) =>
-        row is null || col < 0 || col >= Columns.Count ? "" : Columns[col].Get(row);
+        row is null || col < 0 || col >= Columns.Count ? "" : Columns[col].Get(row) ?? "";
 }

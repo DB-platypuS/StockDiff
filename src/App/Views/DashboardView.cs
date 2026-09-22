@@ -1,12 +1,14 @@
 // 创建者: PlatyPus
 // 创建时间: 2026-09-22
 // 作用: 主面板视图（F4 数据查询与刷新 + F5 数据表格展示），提供仓库/对比项筛选与刷新按钮，
-//       异步拉取库存差异并渲染 12 列表格；处理取消、登录失效与网络异常；复制与导出由 F6-F7 接入。
+//       异步拉取库存差异并渲染 12 列表格；处理取消、登录失效与网络异常；单元格复制（F6）已接入，导出由 F7 接入。
 
 using System.Diagnostics;
+using StockDiff.App.Services;
 using StockDiff.Core.Api;
 using StockDiff.Core.Config;
 using StockDiff.Core.Convert;
+using StockDiff.Core.Copy;
 using StockDiff.Core.Models;
 using StockDiff.Core.Table;
 
@@ -16,10 +18,10 @@ public sealed class DashboardView : UserControl
 {
     private readonly ApiClient _client;
 
-    // 仓库筛选标签：UI 与 Core 转换器共用同一份中文口径，避免字面量在两处重复
-    private const string AllLabel = "全部";
-    private const string FcLabel = "方仓";
-    private const string AsrsLabel = "立库";
+    // 仓库筛选标签：直接引用 Core 转换器的中文口径常量，避免同一字面量在 UI 与 Core 两处重复
+    private const string AllLabel = Converters.LabelAll;
+    private const string FcLabel = Converters.LabelFc;
+    private const string AsrsLabel = Converters.LabelAsrs;
 
     // 左栏与顶栏布局常量：统一左间距/行距，避免坐标魔数散落
     private const int PadX = 16;
@@ -55,6 +57,9 @@ public sealed class DashboardView : UserControl
     // 每次刷新前取消上一次在途请求，保证仅最新请求的结果被采用
     private CancellationTokenSource? _refreshCts;
 
+    // F6 单元格复制：复制规则收口在 Core，视图只负责展示结果文案
+    private readonly CellCopyService _cellCopy;
+
     // 最近一次成功拉取的记录，供后续表格展示与导出模块复用
     internal IReadOnlyList<StockDiffRow> Rows { get; private set; } = Array.Empty<StockDiffRow>();
 
@@ -80,6 +85,8 @@ public sealed class DashboardView : UserControl
         BuildFilterPanel(split.Panel1, username);
         BuildDataPanel(split.Panel2);
         _refreshButton.Click += OnRefreshClick;
+        _grid.CellClick += OnCellClick;
+        _cellCopy = new CellCopyService(new WinClipboard());
     }
 
     // 左栏固定为总宽 20%，窗口缩放时保持比例；尺寸过小则跳过，避免 SplitterDistance 越界
@@ -346,6 +353,32 @@ public sealed class DashboardView : UserControl
         }
     }
 
+    // 单元格点击复制：表头点击（RowIndex/ColumnIndex 为负）忽略；空值不写剪贴板；失败仅提示并记日志
+    private void OnCellClick(object? sender, DataGridViewCellEventArgs e)
+    {
+        if (e.RowIndex < 0 || e.ColumnIndex < 0)
+        {
+            return;
+        }
+
+        var value = _grid.Rows[e.RowIndex].Cells[e.ColumnIndex].Value?.ToString();
+        var result = _cellCopy.Copy(value);
+
+        switch (result.Status)
+        {
+            case CopyStatus.Copied:
+                _statusLabel.ForeColor = Theme.Success;
+                _statusLabel.Text = result.Message;
+                break;
+            case CopyStatus.Failed:
+                Trace.WriteLine($"[单元格复制] 失败: {result.Message}");
+                _statusLabel.ForeColor = Theme.Error;
+                _statusLabel.Text = result.Message;
+                break;
+            // CopyStatus.Empty：空单元格不复制，保持原状态提示不变
+        }
+    }
+
     // 读取仓库单选的接口代码：由 Core 转换器唯一定义代码口径，避免 UI 重复硬编码 fc/asrs/all
     private string CurrentWarehouse()
     {
@@ -359,22 +392,9 @@ public sealed class DashboardView : UserControl
             : Converters.WarehouseCodeFromLabel(AllLabel);
     }
 
-    // 请求期间禁用刷新与筛选项并显示等待光标，避免重复触发
-    private void SetBusy(bool busy)
-    {
-        if (IsDisposed)
-        {
-            return;
-        }
-
-        _refreshButton.Enabled = !busy;
-        _allRadio.Enabled = !busy;
-        _fcRadio.Enabled = !busy;
-        _asrsRadio.Enabled = !busy;
-        _holdCheck.Enabled = !busy;
-        _expiryCheck.Enabled = !busy;
-        UseWaitCursor = busy;
-    }
+    // 请求期间禁用刷新与筛选项并显示等待光标，避免重复触发（实现收口在 UiHelper）
+    private void SetBusy(bool busy) =>
+        UiHelper.SetBusy(this, busy, this, _refreshButton, _allRadio, _fcRadio, _asrsRadio, _holdCheck, _expiryCheck);
 
     // 视图销毁时取消在途请求，避免回调触碰已释放控件
     protected override void Dispose(bool disposing)

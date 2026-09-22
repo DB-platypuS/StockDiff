@@ -97,6 +97,19 @@ public sealed class TableColumnsTests
     public void CellValue_NullRow_ReturnsEmpty() =>
         Assert.Equal("", TableColumns.CellValue(null!, 0));
 
+    [Fact]
+    // Bug 回归：字段在 JSON 中显式为 null 时，单元格仍返回空串而非 null，
+    // 保证 TableColumns → TableGrid → CSV 全链路满足非空契约
+    public void CellValue_NullStringField_ReturnsEmpty()
+    {
+        var row = JsonSerializer.Deserialize<StockDiffRow>(
+            """{"material_code":null,"location":null}""")!;
+
+        Assert.Null(row.MaterialCode);
+        Assert.Equal("", TableColumns.CellValue(row, 0));
+        Assert.Equal("", TableColumns.CellValue(row, 6));
+    }
+
     // 测试辅助：构造一条含三个数量字段的样本记录
     private static StockDiffRow Sample()
     {

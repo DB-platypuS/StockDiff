@@ -116,6 +116,18 @@ public sealed class TableGridTests
     }
 
     [Fact]
+    // Bug 回归：字符串字段在 JSON 中显式为 null 时，单元格文本为空串而非 null，
+    // 避免 null 泄漏进 DataGridView 与后续 CSV 导出
+    public void From_NullStringField_ReturnsEmptyCell()
+    {
+        var row = JsonSerializer.Deserialize<StockDiffRow>("""{"material_code":null}""")!;
+
+        var grid = TableGrid.From(new[] { row });
+
+        Assert.Equal("", grid.Rows[0][0]);
+    }
+
+    [Fact]
     // 防御性：构建后修改输入列表不影响已生成的快照
     public void From_DoesNotRetainInputList()
     {
