@@ -36,6 +36,16 @@ public sealed class TableColumnsTests
         Assert.Equal(ExpectedWidths, TableColumns.Columns.Select(c => c.Width).ToArray());
 
     [Fact]
+    // 防御性拷贝：Headers() 返回独立数组，调用方修改不得污染下一次调用
+    public void Headers_ReturnsIndependentCopy()
+    {
+        var first = TableColumns.Headers();
+        first[0] = "被篡改";
+
+        Assert.Equal("物料编码", TableColumns.Headers()[0]);
+    }
+
+    [Fact]
     // 有且仅有「差异数量」为右对齐（第 5 列）
     public void OnlyQtyDiffColumn_IsRightAligned()
     {

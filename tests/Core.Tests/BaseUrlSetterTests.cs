@@ -49,9 +49,9 @@ public sealed class BaseUrlSetterTests
     {
         var (client, store) = NewPair();
 
-        BaseUrlSetter.SetBaseUrl(client, store, "http://192.168.13.8:7880/");
+        BaseUrlSetter.SetBaseUrl(client, store, "http://192.0.2.10:7880/");
 
-        Assert.Equal("http://192.168.13.8:7880/", store.Load());
+        Assert.Equal("http://192.0.2.10:7880/", store.Load());
     }
 
     [Fact]
@@ -88,8 +88,8 @@ public sealed class BaseUrlSetterTests
 
     [Theory]
     [InlineData("not-a-url")]
-    [InlineData("192.168.13.8:7880")]
-    [InlineData("ftp://192.168.13.8:7880")]
+    [InlineData("192.0.2.10:7880")]
+    [InlineData("ftp://192.0.2.10:7880")]
     [InlineData("http://")]
     // 异常：非法地址抛 ArgumentException，且不落盘、不改写客户端、不清令牌
     public void SetBaseUrl_Invalid_ThrowsWithoutSideEffects(string raw)

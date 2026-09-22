@@ -26,5 +26,5 @@ public sealed class SmokeTests
     [Fact]
     // 冒烟：首尾空白被裁剪
     public void NormalizeBaseUrl_TrimsSurroundingWhitespace() =>
-        Assert.Equal("http://192.168.13.8:7880", AppConfig.NormalizeBaseUrl("  http://192.168.13.8:7880  "));
+        Assert.Equal("http://192.0.2.10:7880", AppConfig.NormalizeBaseUrl("  http://192.0.2.10:7880  "));
 }

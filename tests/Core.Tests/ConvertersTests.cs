@@ -83,6 +83,13 @@ public sealed class ConvertersTests
         Assert.Equal("all", Converters.WarehouseCodeFromLabel(Converters.WarehouseLabelFromCode("xyz")));
 
     [Theory]
+    [InlineData(" fc ")]
+    [InlineData("asrs\t")]
+    // 边界：代码仅做大小写归一、不做 Trim，带首尾空白视为未知值回退「全部」（UI 侧只传精确代码）
+    public void WarehouseLabelFromCode_PaddedCode_FallsBackToAll(string code) =>
+        Assert.Equal("全部", Converters.WarehouseLabelFromCode(code));
+
+    [Theory]
     [InlineData("true")]
     [InlineData("false")]
     public void NumberToString_Bool_KeepsText(string raw)

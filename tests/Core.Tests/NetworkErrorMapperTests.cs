@@ -18,6 +18,16 @@ public sealed class NetworkErrorMapperTests
         Assert.Equal("请求已取消", text);
     }
 
+    [Fact]
+    // 边界：userCancelled 仅影响超时分支，套接字类错误仍追加排查建议
+    public void UserCancelled_StillAppendsSocketHint()
+    {
+        var text = NetworkErrorMapper.Map(
+            new SocketException((int)SocketError.ConnectionRefused), userCancelled: true);
+
+        Assert.Contains("连接被拒绝", text);
+    }
+
     [Theory]
     [InlineData(typeof(TaskCanceledException))]
     [InlineData(typeof(OperationCanceledException))]

@@ -2,6 +2,7 @@
 // 创建时间: 2026-09-21
 // 作用: 库存差异系统 HTTP 客户端，封装接口地址与令牌状态，实现登录认证并统一网络与协议错误处理。
 
+using System.Net.Http.Headers;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
@@ -97,10 +98,7 @@ public sealed class ApiClient
         cts.CancelAfter(AppConfig.LoginTimeout);
 
         var loginUrl = FullUrl("/auth/login");
-        if (!Uri.TryCreate(loginUrl, UriKind.Absolute, out _))
-        {
-            throw new ApiException(NetworkErrorMapper.Map(new UriFormatException()));
-        }
+        EnsureAbsoluteUrl(loginUrl);
 
         try
         {
@@ -139,13 +137,122 @@ public sealed class ApiClient
         }
         catch (OperationCanceledException ex) when (!ct.IsCancellationRequested)
         {
-            throw new ApiException(NetworkErrorMapper.Map(ex), ex);
+            throw WrapNetwork(ex);
         }
         catch (HttpRequestException ex)
         {
-            throw new ApiException(NetworkErrorMapper.Map(ex), ex);
+            throw WrapNetwork(ex);
+        }
+        catch (IOException ex)
+        {
+            // 响应读取期连接中断：统一包装，避免 IOException 逃逸出方法破坏统一错误返回契约
+            throw WrapNetwork(ex);
         }
     }
+
+    // 拉取库存差异：快照令牌（空则要求先登录）→ 60 秒超时 → GET /api/v1/stock/diff
+    // warehouse 空/空白兜底 all；查询串携带 warehouse / compare_hold / compare_expiry（bool 小写）
+    // 登录失效（HTTP 401/403、业务码 401/403、message 含 token）→ 仅清匹配令牌并抛 UnauthorizedException；
+    // 其余 HTTP 非 200 / 业务码非 0 / 解析失败 / 网络异常统一抛 ApiException（网络类附排查建议）
+    public async Task<List<StockDiffRow>> FetchStockDiffAsync(
+        string warehouse, bool compareHold, bool compareExpiry, CancellationToken ct = default)
+    {
+        var token = Token;
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            throw new UnauthorizedException("请先登录");
+        }
+
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(AppConfig.FetchTimeout);
+
+        var fetchUrl = BuildDiffUrl(warehouse, compareHold, compareExpiry);
+        EnsureAbsoluteUrl(fetchUrl);
+
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, fetchUrl);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            using var response = await _http.SendAsync(request, cts.Token).ConfigureAwait(false);
+
+            var status = (int)response.StatusCode;
+            if (status is 401 or 403)
+            {
+                ClearTokenIf(token);
+                throw new UnauthorizedException();
+            }
+
+            if (status != 200)
+            {
+                throw new ApiException($"获取库存差异失败: HTTP {status}");
+            }
+
+            var json = await response.Content.ReadAsStringAsync(cts.Token).ConfigureAwait(false);
+            var parsed = JsonSerializer.Deserialize<StockDiffResponse>(json)
+                ?? throw new ApiException("获取库存差异失败: 响应为空");
+
+            if (parsed.Code != 0)
+            {
+                if (IsAuthFailure(parsed.Code, parsed.Message))
+                {
+                    ClearTokenIf(token);
+                    throw new UnauthorizedException();
+                }
+
+                throw new ApiException(string.IsNullOrWhiteSpace(parsed.Message)
+                    ? $"获取库存差异失败: 错误码 {parsed.Code}"
+                    : parsed.Message);
+            }
+
+            return parsed.Data;
+        }
+        catch (JsonException ex)
+        {
+            throw new ApiException("获取库存差异失败: 响应解析失败", ex);
+        }
+        catch (OperationCanceledException ex) when (!ct.IsCancellationRequested)
+        {
+            throw WrapNetwork(ex);
+        }
+        catch (HttpRequestException ex)
+        {
+            throw WrapNetwork(ex);
+        }
+        catch (IOException ex)
+        {
+            // 同登录：读取响应时的 IO 错误也归一到 ApiException
+            throw WrapNetwork(ex);
+        }
+    }
+
+    // 构建库存差异查询 URL：warehouse 空/空白兜底 all，布尔参数输出小写，参数值统一转义
+    private string BuildDiffUrl(string warehouse, bool compareHold, bool compareExpiry)
+    {
+        var warehouseCode = string.IsNullOrWhiteSpace(warehouse) ? "all" : warehouse;
+        return FullUrl("/stock/diff")
+            + $"?warehouse={Uri.EscapeDataString(warehouseCode)}"
+            + $"&compare_hold={BoolText(compareHold)}"
+            + $"&compare_expiry={BoolText(compareExpiry)}";
+    }
+
+    // 校验完整 URL 合法：非法则抛带 URL 排查提示的 ApiException，避免发出无效请求
+    private static void EnsureAbsoluteUrl(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out _))
+        {
+            throw new ApiException(NetworkErrorMapper.Map(new UriFormatException()));
+        }
+    }
+
+    // 判定业务响应是否代表登录失效：401/403 或 message 含 token（大小写不敏感）
+    private static bool IsAuthFailure(int code, string message) =>
+        code is 401 or 403 || message.Contains("token", StringComparison.OrdinalIgnoreCase);
+
+    // 网络/IO 异常统一包装：附加排查建议并保留原始异常，便于日志追溯根因
+    private static ApiException WrapNetwork(Exception ex) => new(NetworkErrorMapper.Map(ex), ex);
+
+    // 布尔查询参数统一输出小写文本，与后端契约一致
+    private static string BoolText(bool value) => value ? "true" : "false";
 
     // 连接测试：解析 host/端口 → TCP 可达性探测（5s 超时）→ 成功静默返回
     // 失败统一抛 ApiException（含排查建议）；用户主动取消则透传 OperationCanceledException
@@ -161,15 +268,15 @@ public sealed class ApiClient
         }
         catch (OperationCanceledException ex) when (!ct.IsCancellationRequested)
         {
-            throw new ApiException(NetworkErrorMapper.Map(ex), ex);
+            throw WrapNetwork(ex);
         }
         catch (UriFormatException ex)
         {
-            throw new ApiException(NetworkErrorMapper.Map(ex), ex);
+            throw WrapNetwork(ex);
         }
         catch (SocketException ex)
         {
-            throw new ApiException(NetworkErrorMapper.Map(ex), ex);
+            throw WrapNetwork(ex);
         }
     }
 
