@@ -17,7 +17,7 @@ public sealed class DashboardView : UserControl
         var title = new Label
         {
             Text = $"欢迎，{username}",
-            Font = new Font("Microsoft YaHei UI", 16F, FontStyle.Bold),
+            Font = Theme.PageTitleFont,
             AutoSize = true,
             Location = new Point(24, 24)
         };
@@ -25,14 +25,14 @@ public sealed class DashboardView : UserControl
         {
             Text = "主界面建设中，数据查询与表格将在后续版本提供。",
             AutoSize = true,
-            ForeColor = Color.Gray,
+            ForeColor = Theme.Muted,
             Location = new Point(24, 64)
         };
         var version = new Label
         {
             Text = $"v{AppConfig.Version}",
             AutoSize = true,
-            ForeColor = Color.Gray,
+            ForeColor = Theme.Muted,
             Location = new Point(24, 92)
         };
 

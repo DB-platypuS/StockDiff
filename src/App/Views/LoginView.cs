@@ -68,7 +68,7 @@ public sealed class LoginView : UserControl
         CenterCard(host, card);
 
         _loginButton.Click += OnLoginClick;
-        _testButton.Click += (_, _) => ShowComingSoon("测试连接");
+        _testButton.Click += OnTestClick;
         _settingsButton.Click += OnSettingsClick;
         _userBox.TextChanged += (_, _) => SetStatus("");
         _passwordBox.TextChanged += (_, _) => SetStatus("");
@@ -180,12 +180,34 @@ public sealed class LoginView : UserControl
         SetStatus("接口地址已更新，请重新登录");
     }
 
-    // F3 占位：提示该功能将在后续版本提供（真实逻辑属于 F3）
-    private void ShowComingSoon(string feature)
+    // 「测试连接」：对当前接口地址做 TCP 可达性探测，成功/失败两路分别提示（F3）
+    private async void OnTestClick(object? sender, EventArgs e)
     {
-        SetStatus($"{feature}功能将在后续版本提供");
-        MessageBox.Show(this, $"{feature}功能将在后续版本提供。", "功能开发中",
-            MessageBoxButtons.OK, MessageBoxIcon.Information);
+        SetBusy(true);
+        SetStatus("正在测试连接...");
+
+        try
+        {
+            await _client.TestConnectionAsync(_loginCts.Token);
+            SetStatus("✓ 连接成功", Theme.Success);
+            MessageBox.Show(this, $"已成功连接到 {_client.BaseUrl}", "连接测试",
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        catch (OperationCanceledException)
+        {
+            // 视图已销毁导致的主动取消，属预期流程，不提示用户
+            Trace.WriteLine("[连接测试] 请求已取消（视图已关闭）");
+        }
+        catch (Exception ex)
+        {
+            Trace.WriteLine($"[连接测试] 失败: {ex}");
+            SetStatus("连接失败", Theme.Error);
+            MessageBox.Show(this, ex.Message, "连接失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+        finally
+        {
+            SetBusy(false);
+        }
     }
 
     // 按宿主尺寸计算卡片左上角坐标，使卡片始终居中（窗口缩放时重算）
@@ -193,19 +215,6 @@ public sealed class LoginView : UserControl
     {
         card.Left = Math.Max(0, (host.ClientSize.Width - card.Width) / 2);
         card.Top = Math.Max(0, (host.ClientSize.Height - card.Height) / 2);
-    }
-
-    // 构造圆角矩形路径，供卡片与输入框的圆角绘制复用
-    private static GraphicsPath RoundRect(Rectangle r, int radius)
-    {
-        var d = radius * 2;
-        var path = new GraphicsPath();
-        path.AddArc(r.X, r.Y, d, d, 180, 90);
-        path.AddArc(r.Right - d, r.Y, d, d, 270, 90);
-        path.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
-        path.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
-        path.CloseFigure();
-        return path;
     }
 
     // 自绘圆角卡片面板：开启双层缓冲避免闪烁，尺寸退化时跳过 Region 与描边

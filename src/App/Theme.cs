@@ -17,6 +17,7 @@ internal static class Theme
     public static readonly Color Subtle = Color.FromArgb(70, 76, 84);
     public static readonly Color Line = Color.FromArgb(227, 230, 235);
     public static readonly Color Error = Color.FromArgb(214, 69, 69);
+    public static readonly Color Success = Color.FromArgb(38, 154, 92);
     public static readonly Color SecondaryHover = Color.FromArgb(246, 247, 249);
 
     // 字体按用途命名：页面标题 17 / 对话框标题 12 / 登录主按钮 10 / 对话框主按钮 9.5
