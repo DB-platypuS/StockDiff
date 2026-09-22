@@ -13,6 +13,13 @@ public static class AppConfig
     public const string AppName = "库存差异比对系统";
     public const string BaseUrlEnvVar = "KC_STOCKDIFF_BASE_URL";
 
+    // 本地数据目录名：配置（settings.json）与日志（logs/）共用，避免字面量在 App 层多处重复
+    public const string DataDirName = "kc-stock-diff";
+
+    // 日志文件名与单文件上限（2MB）：超出则轮转为 app.log.1，避免长期运行无限增长
+    public const string LogFileName = "app.log";
+    public const long LogMaxBytes = 2 * 1024 * 1024;
+
     // 各接口超时：登录 20s、拉取数据 60s、连接测试 5s
     public static readonly TimeSpan LoginTimeout = TimeSpan.FromSeconds(20);
     public static readonly TimeSpan FetchTimeout = TimeSpan.FromSeconds(60);

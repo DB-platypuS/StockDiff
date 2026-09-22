@@ -31,6 +31,7 @@ public sealed class AppConfigTests
         Assert.Equal("http://127.0.0.1:7880", AppConfig.DefaultBaseUrl);
         Assert.Equal("/api/v1", AppConfig.ApiPrefix);
         Assert.Equal("库存差异比对系统", AppConfig.AppName);
+        Assert.Equal("KC_STOCKDIFF_BASE_URL", AppConfig.BaseUrlEnvVar);
     }
 
     [Fact]

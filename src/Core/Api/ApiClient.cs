@@ -94,60 +94,46 @@ public sealed class ApiClient
             throw new ArgumentException("用户名和密码不能为空");
         }
 
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        cts.CancelAfter(AppConfig.LoginTimeout);
-
         var loginUrl = FullUrl("/auth/login");
         EnsureAbsoluteUrl(loginUrl);
 
-        try
-        {
-            var body = JsonSerializer.Serialize(new LoginRequest(username.Trim(), password));
-            using var content = new StringContent(body, Encoding.UTF8, "application/json");
-            using var response = await _http.PostAsync(loginUrl, content, cts.Token).ConfigureAwait(false);
-
-            if ((int)response.StatusCode != 200)
+        var token = await ExecuteAsync<string>(
+            AppConfig.LoginTimeout,
+            "登录失败: 响应解析失败",
+            async (http, innerCt) =>
             {
-                throw new ApiException($"登录失败: HTTP {(int)response.StatusCode}");
-            }
+                var body = JsonSerializer.Serialize(new LoginRequest(username.Trim(), password));
+                using var content = new StringContent(body, Encoding.UTF8, "application/json");
+                using var response = await http.PostAsync(loginUrl, content, innerCt).ConfigureAwait(false);
 
-            var json = await response.Content.ReadAsStringAsync(cts.Token).ConfigureAwait(false);
-            var parsed = JsonSerializer.Deserialize<LoginResponse>(json)
-                ?? throw new ApiException("登录失败: 响应为空");
+                if ((int)response.StatusCode != 200)
+                {
+                    throw new ApiException($"登录失败: HTTP {(int)response.StatusCode}");
+                }
 
-            if (parsed.Code != 0)
-            {
-                throw new ApiException(string.IsNullOrWhiteSpace(parsed.Message)
-                    ? $"登录失败: 错误码 {parsed.Code}"
-                    : parsed.Message);
-            }
+                var json = await response.Content.ReadAsStringAsync(innerCt).ConfigureAwait(false);
+                var parsed = JsonSerializer.Deserialize<LoginResponse>(json)
+                    ?? throw new ApiException("登录失败: 响应为空");
 
-            var token = parsed.Data?.Token ?? "";
-            if (string.IsNullOrWhiteSpace(token))
-            {
-                throw new ApiException("登录失败: 未返回token");
-            }
+                if (parsed.Code != 0)
+                {
+                    throw new ApiException(string.IsNullOrWhiteSpace(parsed.Message)
+                        ? $"登录失败: 错误码 {parsed.Code}"
+                        : parsed.Message);
+                }
 
-            SetToken(token);
-            return token;
-        }
-        catch (JsonException ex)
-        {
-            throw new ApiException("登录失败: 响应解析失败", ex);
-        }
-        catch (OperationCanceledException ex) when (!ct.IsCancellationRequested)
-        {
-            throw WrapNetwork(ex);
-        }
-        catch (HttpRequestException ex)
-        {
-            throw WrapNetwork(ex);
-        }
-        catch (IOException ex)
-        {
-            // 响应读取期连接中断：统一包装，避免 IOException 逃逸出方法破坏统一错误返回契约
-            throw WrapNetwork(ex);
-        }
+                var value = parsed.Data?.Token ?? "";
+                if (string.IsNullOrWhiteSpace(value))
+                {
+                    throw new ApiException("登录失败: 未返回token");
+                }
+
+                return value;
+            },
+            ct).ConfigureAwait(false);
+
+        SetToken(token);
+        return token;
     }
 
     // 拉取库存差异：快照令牌（空则要求先登录）→ 60 秒超时 → GET /api/v1/stock/diff
@@ -163,54 +149,73 @@ public sealed class ApiClient
             throw new UnauthorizedException("请先登录");
         }
 
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        cts.CancelAfter(AppConfig.FetchTimeout);
-
         var fetchUrl = BuildDiffUrl(warehouse, compareHold, compareExpiry);
         EnsureAbsoluteUrl(fetchUrl);
 
-        try
-        {
-            using var request = new HttpRequestMessage(HttpMethod.Get, fetchUrl);
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-            using var response = await _http.SendAsync(request, cts.Token).ConfigureAwait(false);
-
-            var status = (int)response.StatusCode;
-            if (status is 401 or 403)
+        return await ExecuteAsync<List<StockDiffRow>>(
+            AppConfig.FetchTimeout,
+            "获取库存差异失败: 响应解析失败",
+            async (http, innerCt) =>
             {
-                ClearTokenIf(token);
-                throw new UnauthorizedException();
-            }
+                using var request = new HttpRequestMessage(HttpMethod.Get, fetchUrl);
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+                using var response = await http.SendAsync(request, innerCt).ConfigureAwait(false);
 
-            if (status != 200)
-            {
-                throw new ApiException($"获取库存差异失败: HTTP {status}");
-            }
-
-            var json = await response.Content.ReadAsStringAsync(cts.Token).ConfigureAwait(false);
-            var parsed = JsonSerializer.Deserialize<StockDiffResponse>(json)
-                ?? throw new ApiException("获取库存差异失败: 响应为空");
-
-            if (parsed.Code != 0)
-            {
-                if (IsAuthFailure(parsed.Code, parsed.Message))
+                var status = (int)response.StatusCode;
+                if (status is 401 or 403)
                 {
                     ClearTokenIf(token);
                     throw new UnauthorizedException();
                 }
 
-                throw new ApiException(string.IsNullOrWhiteSpace(parsed.Message)
-                    ? $"获取库存差异失败: 错误码 {parsed.Code}"
-                    : parsed.Message);
-            }
+                if (status != 200)
+                {
+                    throw new ApiException($"获取库存差异失败: HTTP {status}");
+                }
 
-            return parsed.Data;
+                var json = await response.Content.ReadAsStringAsync(innerCt).ConfigureAwait(false);
+                var parsed = JsonSerializer.Deserialize<StockDiffResponse>(json)
+                    ?? throw new ApiException("获取库存差异失败: 响应为空");
+
+                if (parsed.Code != 0)
+                {
+                    if (IsAuthFailure(parsed.Code, parsed.Message))
+                    {
+                        ClearTokenIf(token);
+                        throw new UnauthorizedException();
+                    }
+
+                    throw new ApiException(string.IsNullOrWhiteSpace(parsed.Message)
+                        ? $"获取库存差异失败: 错误码 {parsed.Code}"
+                        : parsed.Message);
+                }
+
+                return parsed.Data;
+            },
+            ct).ConfigureAwait(false);
+    }
+
+    // 统一承载「带超时的请求 + 异常归一」，消除登录与拉取两处约 70 行重复
+    // timeout：本次请求超时；parseErrorMessage：JsonException 的包装文案（两处不同）
+    // action：真实请求与业务码判定；userToken：调用方令牌，用于区分「用户取消」与「请求超时」
+    private async Task<T> ExecuteAsync<T>(
+        TimeSpan timeout,
+        string parseErrorMessage,
+        Func<HttpClient, CancellationToken, Task<T>> action,
+        CancellationToken userToken)
+    {
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(userToken);
+        cts.CancelAfter(timeout);
+
+        try
+        {
+            return await action(_http, cts.Token).ConfigureAwait(false);
         }
         catch (JsonException ex)
         {
-            throw new ApiException("获取库存差异失败: 响应解析失败", ex);
+            throw new ApiException(parseErrorMessage, ex);
         }
-        catch (OperationCanceledException ex) when (!ct.IsCancellationRequested)
+        catch (OperationCanceledException ex) when (!userToken.IsCancellationRequested)
         {
             throw WrapNetwork(ex);
         }
@@ -220,7 +225,7 @@ public sealed class ApiClient
         }
         catch (IOException ex)
         {
-            // 同登录：读取响应时的 IO 错误也归一到 ApiException
+            // 响应读取期连接中断：统一包装，避免 IOException 逃逸出方法破坏统一错误返回契约
             throw WrapNetwork(ex);
         }
     }

@@ -646,6 +646,61 @@ public sealed class ApiClientTests
         Assert.IsType<IOException>(ex.InnerException);
     }
 
+    [Fact]
+    // 异常：登录响应 message 为 JSON null 且业务码非 0 时回退错误码文案，不漏出 NullReferenceException
+    public async Task LoginAsync_NullMessage_FallsBackToErrorCode()
+    {
+        var client = NewClient(new StubHandler(_ => Json(HttpStatusCode.OK,
+            """{"code":1001,"message":null,"data":null}""")));
+
+        var ex = await Assert.ThrowsAsync<ApiException>(() => client.LoginAsync("000", "0000"));
+
+        Assert.Equal("登录失败: 错误码 1001", ex.Message);
+    }
+
+    [Fact]
+    // 异常：token 为 JSON null（而非字段缺失）时同样按「未返回token」处理
+    public async Task LoginAsync_NullTokenValue_ThrowsApiException()
+    {
+        var client = NewClient(new StubHandler(_ => Json(HttpStatusCode.OK,
+            """{"code":0,"message":"success","data":{"token":null}}""")));
+
+        var ex = await Assert.ThrowsAsync<ApiException>(() => client.LoginAsync("000", "0000"));
+
+        Assert.Contains("未返回token", ex.Message);
+    }
+
+    [Fact]
+    // 边界：纯空白令牌视为未登录，抛 UnauthorizedException 且不发出请求
+    public async Task FetchStockDiffAsync_WhitespaceToken_ThrowsWithoutRequest()
+    {
+        var called = false;
+        var handler = new StubHandler(_ => { called = true; return Json(HttpStatusCode.OK, DiffJson); });
+        var client = NewClient(handler);
+        client.SetToken("   ");
+
+        var ex = await Assert.ThrowsAsync<UnauthorizedException>(() => client.FetchStockDiffAsync("all", false, false));
+
+        Assert.Equal("请先登录", ex.Message);
+        Assert.False(called);
+    }
+
+    [Fact]
+    // 安全：warehouse 含查询串分隔符时被转义，不会注入额外查询参数
+    public async Task FetchStockDiffAsync_WarehouseWithSpecialChars_IsEscaped()
+    {
+        var handler = new StubHandler(_ => Json(HttpStatusCode.OK, DiffJson));
+        var client = NewClient(handler);
+        client.SetToken("T");
+
+        await client.FetchStockDiffAsync("a&b=c d", false, false);
+
+        var query = handler.LastRequest!.RequestUri!.Query;
+        // 仅两个分隔符（compare_hold / compare_expiry），注入的 & 与 = 必须已被转义
+        Assert.Equal(2, query.Count(c => c == '&'));
+        Assert.DoesNotContain("b=c", query);
+    }
+
     // 测试替身：拦截请求并保留最近一次的请求对象与请求体，供断言使用
     private sealed class StubHandler : HttpMessageHandler
     {

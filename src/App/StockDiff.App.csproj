@@ -19,6 +19,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="App.Tests" />
     <ProjectReference Include="..\Core\StockDiff.Core.csproj" />
   </ItemGroup>
 

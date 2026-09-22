@@ -15,9 +15,22 @@ public static class AppSettings
     private static readonly object Lock = new();
     private static string? _baseUrl;
 
-    // 配置目录：%AppData%\kc-stock-diff（每用户可写，无需管理员权限）
-    private static string Dir => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "kc-stock-diff");
+    // 测试专用重定向目录：null 表示使用默认的 %AppData%\kc-stock-diff
+    private static string? _overrideDir;
+
+    // 配置目录：%AppData%\kc-stock-diff（每用户可写，无需管理员权限）；
+    // 单测通过 OverrideConfigDir 重定向到临时目录，避免覆盖真实用户配置
+    private static string Dir => _overrideDir ?? Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), AppConfig.DataDirName);
+
+    // 测试专用：重定向配置目录，传 null 恢复默认；生产代码不应调用
+    internal static void OverrideConfigDir(string? dir)
+    {
+        lock (Lock)
+        {
+            _overrideDir = dir;
+        }
+    }
 
     // 配置文件路径：settings.json
     private static string SettingsFile => Path.Combine(Dir, "settings.json");

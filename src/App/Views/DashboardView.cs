@@ -1,13 +1,14 @@
 // 创建者: PlatyPus
 // 创建时间: 2026-09-22
-// 作用: 主面板视图（F4 数据查询与刷新），提供仓库/对比项筛选与刷新按钮，异步拉取库存差异，
-//       处理取消、登录失效与网络异常；表格展示、复制与导出由 F5-F7 在此基础上接入。
+// 作用: 主面板视图（F4 数据查询与刷新 + F5 数据表格展示），提供仓库/对比项筛选与刷新按钮，
+//       异步拉取库存差异并渲染 12 列表格；处理取消、登录失效与网络异常；复制与导出由 F6-F7 接入。
 
 using System.Diagnostics;
 using StockDiff.Core.Api;
 using StockDiff.Core.Config;
 using StockDiff.Core.Convert;
 using StockDiff.Core.Models;
+using StockDiff.Core.Table;
 
 namespace StockDiff.App.Views;
 
@@ -39,6 +40,17 @@ public sealed class DashboardView : UserControl
     private readonly Button _refreshButton = new() { Text = "刷新数据" };
     private readonly Label _statusLabel = new() { Text = "等待刷新", AutoSize = true, ForeColor = Theme.Muted };
     private readonly Label _countLabel = new() { Text = "0 条记录", AutoSize = true, ForeColor = Theme.Muted };
+
+    // F5 数据表格：只读 DataGridView（12 列）与空数据提示浮层
+    private readonly DataGridView _grid = new();
+    private readonly Label _emptyLabel = new()
+    {
+        Text = "暂无数据，请点击“刷新数据”",
+        AutoSize = true,
+        ForeColor = Theme.Muted,
+        BackColor = Color.White
+    };
+    private readonly Panel _gridHost = new() { Dock = DockStyle.Fill, BackColor = Color.White };
 
     // 每次刷新前取消上一次在途请求，保证仅最新请求的结果被采用
     private CancellationTokenSource? _refreshCts;
@@ -169,8 +181,111 @@ public sealed class DashboardView : UserControl
         status.Controls.Add(_statusLabel);
         status.Controls.Add(_countLabel);
 
+        BuildGrid();
+        _gridHost.Controls.Add(_grid);
+        _gridHost.Controls.Add(_emptyLabel);
+        // 后加入的控件处于 z 序底部，会被 Dock=Fill 的表格完全遮住，需提到最前才可见
+        _emptyLabel.BringToFront();
+        _gridHost.Resize += (_, _) => CenterEmptyLabel();
+
+        // 填充区先加入，Top/Bottom 后加入，确保表格占据中部剩余空间
+        panel.Controls.Add(_gridHost);
         panel.Controls.Add(header);
         panel.Controls.Add(status);
+        CenterEmptyLabel();
+    }
+
+    // 配置 12 列表格：只读、禁增删行/调行高、无行头、单元格选择；列顺序/对齐由 TableColumns 派生，
+    // 列宽按表头与内容自动撑开，表头允许换行且高度自适应，避免表头文字被截断为省略号
+    private void BuildGrid()
+    {
+        _grid.Dock = DockStyle.Fill;
+        _grid.ReadOnly = true;
+        _grid.AllowUserToAddRows = false;
+        _grid.AllowUserToDeleteRows = false;
+        _grid.AllowUserToResizeRows = false;
+        _grid.RowHeadersVisible = false;
+        _grid.SelectionMode = DataGridViewSelectionMode.CellSelect;
+        _grid.MultiSelect = false;
+        _grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None;
+        _grid.AllowUserToResizeColumns = true;
+        _grid.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.AutoSize;
+        _grid.BackgroundColor = Color.White;
+        _grid.BorderStyle = BorderStyle.None;
+        _grid.EnableHeadersVisualStyles = false;
+        _grid.ColumnHeadersDefaultCellStyle = new DataGridViewCellStyle
+        {
+            Alignment = DataGridViewContentAlignment.MiddleCenter,
+            WrapMode = DataGridViewTriState.True,
+            BackColor = Theme.SecondaryHover,
+            ForeColor = Theme.Ink
+        };
+
+        foreach (var column in TableColumns.Columns)
+        {
+            _grid.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                HeaderText = column.Header,
+                AutoSizeMode = DataGridViewAutoSizeColumnMode.AllCells,
+                SortMode = DataGridViewColumnSortMode.NotSortable,
+                DefaultCellStyle = new DataGridViewCellStyle
+                {
+                    Alignment = column.Align == ColumnAlign.Right
+                        ? DataGridViewContentAlignment.MiddleRight
+                        : DataGridViewContentAlignment.MiddleLeft
+                }
+            });
+        }
+    }
+
+    // 把拉取结果投影为表格模型并逐格填充；不用 DataSource，空值与对齐完全由列定义决定
+    private void PopulateGrid(IReadOnlyList<StockDiffRow> rows)
+    {
+        if (IsDisposed || _grid.IsDisposed)
+        {
+            return;
+        }
+
+        var model = TableGrid.From(rows);
+
+        // 批量填充：填充期间把列宽模式降为 None 并挂起布局，避免「每加一行就重算整表列宽」的 O(n²) 开销；
+        // 填充后一次性恢复 AllCells，列宽最终结果与逐行填充完全一致。
+        SetColumnAutoSize(DataGridViewAutoSizeColumnMode.None);
+        _grid.SuspendLayout();
+        try
+        {
+            _grid.Rows.Clear();
+            foreach (var cells in model.Rows)
+            {
+                _grid.Rows.Add((object[])cells);
+            }
+        }
+        finally
+        {
+            _grid.ResumeLayout(false);
+            SetColumnAutoSize(DataGridViewAutoSizeColumnMode.AllCells);
+        }
+
+        _emptyLabel.Text = "无差异数据";
+        _emptyLabel.Visible = model.IsEmpty;
+        CenterEmptyLabel();
+    }
+
+    // 统一设置全部列的自动列宽模式：填充期间置 None 抑制逐行重算，填充完成后恢复 AllCells 触发一次重算
+    private void SetColumnAutoSize(DataGridViewAutoSizeColumnMode mode)
+    {
+        for (var i = 0; i < _grid.Columns.Count; i++)
+        {
+            _grid.Columns[i].AutoSizeMode = mode;
+        }
+    }
+
+    // 空数据提示浮层在表格区域居中（窗口缩放时重算）
+    private void CenterEmptyLabel()
+    {
+        _emptyLabel.Location = new Point(
+            Math.Max(0, (_gridHost.ClientSize.Width - _emptyLabel.Width) / 2),
+            Math.Max(0, (_gridHost.ClientSize.Height - _emptyLabel.Height) / 2));
     }
 
     // 刷新：UI 线程快照筛选条件 → 取消旧请求并新建 → 拉取 → 结果过期则丢弃 → 更新计数与状态
@@ -197,6 +312,7 @@ public sealed class DashboardView : UserControl
             }
 
             Rows = rows;
+            PopulateGrid(rows);
             _countLabel.Text = $"{rows.Count} 条记录";
             _statusLabel.Text = rows.Count > 0 ? $"更新时间: {DateTime.Now:HH:mm:ss}" : "无差异数据";
         }

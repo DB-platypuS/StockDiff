@@ -9,6 +9,7 @@ using System.Net.Sockets;
 using System.Text;
 using StockDiff.Core.Api;
 using StockDiff.Core.Convert;
+using StockDiff.Core.Table;
 using Xunit;
 
 namespace Core.Tests;
@@ -65,6 +66,30 @@ public sealed class FetchIntegrationTests
             () => client.FetchStockDiffAsync("all", false, false));
 
         Assert.Equal("", client.Token);
+    }
+
+    [Fact]
+    // 端到端：登录 → 拉取受保护接口 → 投影为表格模型，验证 12 列、表头完整、差异数量右对齐
+    public async Task LoginThenFetch_ProjectsToTwelveColumnGrid_EndToEnd()
+    {
+        using var server = new LoopbackRouter(new()
+        {
+            ["/api/v1/auth/login"] = (200, LoginBody),
+            ["/api/v1/stock/diff"] = (200, DiffBody)
+        });
+        var client = new ApiClient(server.BaseUrl);
+
+        await client.LoginAsync("000", "0000");
+        var rows = await client.FetchStockDiffAsync("all", false, false);
+        var grid = TableGrid.From(rows);
+
+        Assert.Equal(12, grid.ColumnCount);
+        Assert.Equal(rows.Count, grid.RowCount);
+        Assert.False(grid.IsEmpty);
+        Assert.Equal(TableColumns.Headers(), grid.Headers.ToArray());
+        Assert.Equal("AC04672026013030856", grid.Rows[0][0]);
+        Assert.Equal("方仓", grid.Rows[0][2]);
+        Assert.Equal(ColumnAlign.Right, grid.Aligns[5]);
     }
 
     // 一次已处理请求的关键信息

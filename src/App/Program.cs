@@ -3,6 +3,7 @@
 // 作用: 应用程序入口，初始化 WinForms 运行时、文件日志与全局异常兜底，再启动主窗体。
 
 using System.Diagnostics;
+using StockDiff.Core.Config;
 
 namespace StockDiff.App;
 
@@ -28,11 +29,11 @@ internal static class Program
         {
             var dir = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                "kc-stock-diff",
+                AppConfig.DataDirName,
                 "logs");
             Directory.CreateDirectory(dir);
 
-            var logFile = Path.Combine(dir, "app.log");
+            var logFile = Path.Combine(dir, AppConfig.LogFileName);
             RotateIfTooLarge(logFile);
 
             var writer = new StreamWriter(logFile, append: true) { AutoFlush = true };
@@ -45,14 +46,11 @@ internal static class Program
         }
     }
 
-    // 日志单文件上限 2MB，超出则归档为 app.log.1 后重新开始，避免长期运行无限增长
-    private const long MaxLogBytes = 2 * 1024 * 1024;
-
-    // 日志超过上限时轮转：保留上一周期为 app.log.1，旧归档直接覆盖
+    // 日志超过上限时轮转：保留上一周期为 app.log.1，旧归档直接覆盖（上限见 AppConfig.LogMaxBytes）
     private static void RotateIfTooLarge(string logFile)
     {
         var info = new FileInfo(logFile);
-        if (!info.Exists || info.Length < MaxLogBytes)
+        if (!info.Exists || info.Length < AppConfig.LogMaxBytes)
         {
             return;
         }
