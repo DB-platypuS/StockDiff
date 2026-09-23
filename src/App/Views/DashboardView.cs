@@ -1,7 +1,7 @@
 // 创建者: PlatyPus
 // 创建时间: 2026-09-22
-// 作用: 主面板视图（F4 数据查询与刷新 + F5 数据表格展示），提供仓库/对比项筛选与刷新按钮，
-//       异步拉取库存差异并渲染 12 列表格；处理取消、登录失效与网络异常；单元格复制（F6）已接入，导出由 F7 接入。
+// 作用: 主面板视图（F4 数据查询与刷新 + F5 数据表格展示 + F7 CSV 导出），提供仓库/对比项筛选与刷新按钮，
+//       异步拉取库存差异并渲染 12 列表格；处理取消、登录失效与网络异常；单元格复制（F6）与导出 CSV（F7）已接入。
 
 using System.Diagnostics;
 using StockDiff.App.Services;
@@ -9,6 +9,7 @@ using StockDiff.Core.Api;
 using StockDiff.Core.Config;
 using StockDiff.Core.Convert;
 using StockDiff.Core.Copy;
+using StockDiff.Core.Export;
 using StockDiff.Core.Models;
 using StockDiff.Core.Table;
 
@@ -40,6 +41,7 @@ public sealed class DashboardView : UserControl
     private readonly CheckBox _holdCheck = new() { Text = "对比冻结状态", AutoSize = true };
     private readonly CheckBox _expiryCheck = new() { Text = "对比过期日期", AutoSize = true };
     private readonly Button _refreshButton = new() { Text = "刷新数据" };
+    private readonly Button _exportButton = new() { Text = "导出 CSV", Enabled = false };
     private readonly Label _statusLabel = new() { Text = "等待刷新", AutoSize = true, ForeColor = Theme.Muted };
     private readonly Label _countLabel = new() { Text = "0 条记录", AutoSize = true, ForeColor = Theme.Muted };
 
@@ -85,6 +87,7 @@ public sealed class DashboardView : UserControl
         BuildFilterPanel(split.Panel1, username);
         BuildDataPanel(split.Panel2);
         _refreshButton.Click += OnRefreshClick;
+        _exportButton.Click += OnExportClick;
         _grid.CellClick += OnCellClick;
         _cellCopy = new CellCopyService(new WinClipboard());
     }
@@ -157,7 +160,7 @@ public sealed class DashboardView : UserControl
         Location = new Point(PadX, y)
     };
 
-    // 右栏：标题、刷新按钮、状态与计数；数据表格由 F5 接入
+    // 右栏：标题、导出/刷新按钮、状态与计数、数据表格
     private void BuildDataPanel(Control panel)
     {
         var header = new Panel { Dock = DockStyle.Top, Height = 56, BackColor = Color.White };
@@ -171,9 +174,17 @@ public sealed class DashboardView : UserControl
         });
         Theme.StylePrimary(_refreshButton, Theme.BodyFont);
         _refreshButton.Size = new Size(96, 32);
+        Theme.StyleSecondary(_exportButton, Theme.BodyFont);
+        _exportButton.Size = new Size(96, 32);
         header.Controls.Add(_refreshButton);
-        void PlaceButton() => _refreshButton.Location =
-            new Point(Math.Max(PadX, header.Width - _refreshButton.Width - PadX), HeaderButtonTop);
+        header.Controls.Add(_exportButton);
+        void PlaceButton()
+        {
+            _refreshButton.Location =
+                new Point(Math.Max(PadX, header.Width - _refreshButton.Width - PadX), HeaderButtonTop);
+            _exportButton.Location =
+                new Point(Math.Max(PadX, _refreshButton.Left - _exportButton.Width - 12), HeaderButtonTop);
+        }
         header.Resize += (_, _) => PlaceButton();
         PlaceButton();
 
@@ -320,6 +331,7 @@ public sealed class DashboardView : UserControl
 
             Rows = rows;
             PopulateGrid(rows);
+            UpdateExportEnabled();
             _countLabel.Text = $"{rows.Count} 条记录";
             _statusLabel.Text = rows.Count > 0 ? $"更新时间: {DateTime.Now:HH:mm:ss}" : "无差异数据";
         }
@@ -338,6 +350,7 @@ public sealed class DashboardView : UserControl
             Trace.WriteLine($"[数据查询] 失败: {ex}");
             _statusLabel.ForeColor = Theme.Error;
             _statusLabel.Text = "数据获取失败";
+            UpdateExportEnabled();
             MessageBox.Show(this, ex.Message, "数据获取失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
         finally
@@ -379,18 +392,92 @@ public sealed class DashboardView : UserControl
         }
     }
 
-    // 读取仓库单选的接口代码：由 Core 转换器唯一定义代码口径，避免 UI 重复硬编码 fc/asrs/all
-    private string CurrentWarehouse()
+    // 导出 CSV：无数据直接提示；否则弹保存对话框 → 建文件 → 由 Core 纯逻辑写流（UTF-8 BOM）；
+    // 成功/失败均更新状态栏并记日志，异常在此统一收口，不向外抛出。
+    private async void OnExportClick(object? sender, EventArgs e)
     {
-        if (_fcRadio.Checked)
+        if (Rows.Count == 0)
         {
-            return Converters.WarehouseCodeFromLabel(FcLabel);
+            MessageBox.Show(this, "暂无数据可导出", "导出 CSV", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
         }
 
-        return _asrsRadio.Checked
-            ? Converters.WarehouseCodeFromLabel(AsrsLabel)
-            : Converters.WarehouseCodeFromLabel(AllLabel);
+        using var dialog = new SaveFileDialog
+        {
+            Filter = "CSV 文件|*.csv",
+            DefaultExt = "csv",
+            FileName = CsvExporter.BuildDefaultFileName(CurrentWarehouseLabel())
+        };
+        if (dialog.ShowDialog(this) != DialogResult.OK)
+        {
+            return;
+        }
+
+        var target = dialog.FileName;
+        var rows = Rows;
+
+        try
+        {
+            // 先写临时文件再原子替换：写失败既不残留半截文件，也不破坏已存在的同名文件；
+            // 导出为本地 IO，移到后台线程避免大数据量时阻塞界面
+            await Task.Run(() =>
+            {
+                var temp = target + ".tmp";
+                try
+                {
+                    using (var file = File.Create(temp))
+                    {
+                        CsvExporter.Write(file, rows);
+                    }
+
+                    File.Move(temp, target, overwrite: true);
+                }
+                catch
+                {
+                    if (File.Exists(temp))
+                    {
+                        File.Delete(temp);
+                    }
+
+                    throw;
+                }
+            });
+
+            if (IsDisposed)
+            {
+                return;
+            }
+
+            Trace.WriteLine($"[CSV 导出] 成功: {target} ({rows.Count} 条)");
+            _statusLabel.ForeColor = Theme.Success;
+            _statusLabel.Text = $"已导出: {Path.GetFileName(target)}";
+            MessageBox.Show(this, "CSV 已保存", "导出 CSV", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        catch (Exception ex)
+        {
+            // 详细异常仅记日志；对用户只给固定文案，避免泄露本地路径等实现细节
+            Trace.WriteLine($"[CSV 导出] 失败: {ex}");
+            if (IsDisposed)
+            {
+                return;
+            }
+
+            _statusLabel.ForeColor = Theme.Error;
+            _statusLabel.Text = "导出失败";
+            MessageBox.Show(this, "导出失败，请检查目标文件是否被占用或磁盘空间是否充足。",
+                "导出失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
     }
+
+    // 当前仓库筛选的中文标签，供导出默认文件名复用（不改变请求代码口径）
+    private string CurrentWarehouseLabel() =>
+        _fcRadio.Checked ? FcLabel : _asrsRadio.Checked ? AsrsLabel : AllLabel;
+
+    // 导出可用性统一由最近一次拉取结果决定：有数据才可导出（刷新成功/失败两处共用）
+    private void UpdateExportEnabled() => _exportButton.Enabled = Rows.Count > 0;
+
+    // 读取仓库单选的接口代码：由标签经 Core 转换器派生代码口径，与默认文件名共用同一判断
+    private string CurrentWarehouse() => Converters.WarehouseCodeFromLabel(CurrentWarehouseLabel());
 
     // 请求期间禁用刷新与筛选项并显示等待光标，避免重复触发（实现收口在 UiHelper）
     private void SetBusy(bool busy) =>
