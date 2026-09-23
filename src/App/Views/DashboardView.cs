@@ -171,28 +171,56 @@ public sealed class DashboardView : UserControl
             Dock = DockStyle.Bottom,
             FlowDirection = FlowDirection.TopDown,
             AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
             Padding = new Padding(PadX, 0, PadX, PadX),
             BackColor = Color.Transparent
         };
 
-        footer.Controls.Add(new Label
+        var address = new Label
         {
             Text = _client.BaseUrl,
             Font = Theme.AddressFont,
             ForeColor = Theme.Muted,
             AutoSize = true,
             MaximumSize = new Size(AddressWrapWidth, 0)
-        });
-        footer.Controls.Add(BuildSessionButtonRow());
-        footer.Controls.Add(new Label
+        };
+        var sessionRow = BuildSessionButtonRow();
+        var version = new Label
         {
             Text = $"v{AppConfig.Version}",
             Font = Theme.AddressFont,
             ForeColor = Theme.Muted,
             AutoSize = true
-        });
+        };
 
+        footer.Controls.Add(address);
+        footer.Controls.Add(sessionRow);
+        footer.Controls.Add(version);
+
+        // 窄窗适配：按页脚可用宽度约束地址与按钮行，超出时地址换行、按钮行折行，避免被裁剪看不见
+        footer.Resize += (_, _) => FitFooterWidth(footer, address, sessionRow);
         return footer;
+    }
+
+    // 将地址标签与按钮行的最大宽度对齐到页脚可用宽度：地址自动换行、按钮行按 WrapContents 折行。
+    // 仅 AutoSize 时按钮行不会折行（会被单行内容撑宽），必须靠 MaximumSize 才能触发 WrapContents。
+    private static void FitFooterWidth(FlowLayoutPanel footer, Label address, Control sessionRow)
+    {
+        var available = footer.ClientSize.Width - footer.Padding.Horizontal;
+        if (available <= 0)
+        {
+            return;
+        }
+
+        if (address.MaximumSize.Width != available)
+        {
+            address.MaximumSize = new Size(available, 0);
+        }
+
+        if (sessionRow.MaximumSize.Width != available)
+        {
+            sessionRow.MaximumSize = new Size(available, 0);
+        }
     }
 
     // F8「设置」「退出登录」按钮行：横向排列，窄窗可自动换行。

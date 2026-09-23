@@ -34,6 +34,20 @@ public sealed class LoginView : UserControl
         UseSystemPasswordChar = true,
         PlaceholderText = "密码"
     };
+
+    // 显示/隐藏密码切换：内嵌在密码框描边容器右侧，避免明文密码长期暴露
+    private readonly Button _togglePasswordButton = new()
+    {
+        Text = "显示",
+        Dock = DockStyle.Right,
+        Width = 44,
+        FlatStyle = FlatStyle.Flat,
+        BackColor = Color.White,
+        ForeColor = Theme.Muted,
+        Font = Theme.BodyFont,
+        Cursor = Cursors.Hand,
+        TabStop = false
+    };
     private readonly Button _loginButton = new() { Text = "登 录", Height = 40, Dock = DockStyle.Top };
     private readonly Button _testButton = new() { Text = "测试连接", Size = new Size(88, 32), Margin = new Padding(0, 0, 10, 0) };
     private readonly Button _settingsButton = new() { Text = "API 设置", Size = new Size(88, 32), Margin = new Padding(0) };
@@ -59,6 +73,8 @@ public sealed class LoginView : UserControl
         Theme.StylePrimary(_loginButton, Theme.LoginButtonFont);
         Theme.StyleSecondary(_testButton, Theme.BodyFont, wideHitArea: true);
         Theme.StyleSecondary(_settingsButton, Theme.BodyFont, wideHitArea: true);
+        _togglePasswordButton.FlatAppearance.BorderSize = 0;
+        _togglePasswordButton.FlatAppearance.MouseOverBackColor = Theme.SecondaryHover;
 
         var card = BuildCard();
         var host = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Canvas };
@@ -70,6 +86,7 @@ public sealed class LoginView : UserControl
         _loginButton.Click += OnLoginClick;
         _testButton.Click += OnTestClick;
         _settingsButton.Click += OnSettingsClick;
+        _togglePasswordButton.Click += (_, _) => TogglePassword();
         _userBox.TextChanged += (_, _) => SetStatus("");
         _passwordBox.TextChanged += (_, _) => SetStatus("");
     }
@@ -96,7 +113,7 @@ public sealed class LoginView : UserControl
         inner.Controls.Add(CreateDivider());
         inner.Controls.Add(_addressValue);
         inner.Controls.Add(MakeInput(_userBox));
-        inner.Controls.Add(MakeInput(_passwordBox));
+        inner.Controls.Add(MakePasswordInput());
         inner.Controls.Add(_loginButton);
         inner.Controls.Add(CreateActions());
         inner.Controls.Add(_statusLabel);
@@ -157,6 +174,23 @@ public sealed class LoginView : UserControl
     // 登录页输入框：统一宽度与下边距，圆角描边外观由 Theme 统一提供
     private static Panel MakeInput(TextBox box) =>
         Theme.MakeInput(box, new Padding(10, 9, 10, 9), new Size(InputWidth, 38), new Padding(0, 0, 0, 12));
+
+    // 密码输入：描边容器右侧内嵌切换按钮，右侧内边距收窄给按钮留位；
+    // 先由 Theme 加入 Dock=Fill 的密码框、再追加 Dock=Right 的按钮，布局时按钮先占右边、密码框填充剩余
+    private Panel MakePasswordInput()
+    {
+        var wrap = Theme.MakeInput(
+            _passwordBox, new Padding(10, 9, 6, 9), new Size(InputWidth, 38), new Padding(0, 0, 0, 12));
+        wrap.Controls.Add(_togglePasswordButton);
+        return wrap;
+    }
+
+    // 切换密码明文显示：只改变掩码方式，不清空已输入内容
+    private void TogglePassword()
+    {
+        _passwordBox.UseSystemPasswordChar = !_passwordBox.UseSystemPasswordChar;
+        _togglePasswordButton.Text = _passwordBox.UseSystemPasswordChar ? "显示" : "隐藏";
+    }
 
     // 「API 设置」：打开接口地址对话框；保存成功后刷新地址展示并提示重新登录
     // （地址已由 BaseUrlSetter 落盘并清空令牌，此处只负责界面反馈）
@@ -303,7 +337,7 @@ public sealed class LoginView : UserControl
 
     // 登录期间禁用输入与按钮并切换等待光标，防止重复提交（实现收口在 UiHelper）
     private void SetBusy(bool busy) =>
-        UiHelper.SetBusy(this, busy, this, _loginButton, _testButton, _settingsButton, _userBox, _passwordBox);
+        UiHelper.SetBusy(this, busy, this, _loginButton, _testButton, _settingsButton, _userBox, _passwordBox, _togglePasswordButton);
 
     // 更新状态文字与颜色，具体实现收口在 UiHelper
     private void SetStatus(string text, Color? color = null) =>

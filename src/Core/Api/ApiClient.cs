@@ -2,6 +2,7 @@
 // 创建时间: 2026-09-21
 // 作用: 库存差异系统 HTTP 客户端，封装接口地址与令牌状态，实现登录认证并统一网络与协议错误处理。
 
+using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Sockets;
 using System.Text;
@@ -14,7 +15,16 @@ namespace StockDiff.Core.Api;
 
 public sealed class ApiClient
 {
-    private static readonly HttpClient SharedHttp = new() { Timeout = Timeout.InfiniteTimeSpan };
+    // 生产共享 HttpClient：开启响应自动解压（gzip/deflate/br），大 JSON 传输字节数可显著下降
+    private static readonly HttpClient SharedHttp = new(new HttpClientHandler
+    {
+        AutomaticDecompression = DecompressionMethods.GZip
+            | DecompressionMethods.Deflate
+            | DecompressionMethods.Brotli
+    })
+    {
+        Timeout = Timeout.InfiniteTimeSpan
+    };
 
     private readonly object _lock = new();
     private readonly HttpClient _http;
@@ -111,8 +121,11 @@ public sealed class ApiClient
                     throw new ApiException($"登录失败: HTTP {(int)response.StatusCode}");
                 }
 
-                var json = await response.Content.ReadAsStringAsync(innerCt).ConfigureAwait(false);
-                var parsed = JsonSerializer.Deserialize<LoginResponse>(json)
+                // 流式反序列化：直接读响应流，省去整段 JSON 字符串的分配与二次解析
+                await using var stream = await response.Content.ReadAsStreamAsync(innerCt).ConfigureAwait(false);
+                var parsed = await JsonSerializer
+                    .DeserializeAsync<LoginResponse>(stream, cancellationToken: innerCt)
+                    .ConfigureAwait(false)
                     ?? throw new ApiException("登录失败: 响应为空");
 
                 if (parsed.Code != 0)
@@ -170,11 +183,15 @@ public sealed class ApiClient
 
                 if (status != 200)
                 {
+                 
                     throw new ApiException($"获取库存差异失败: HTTP {status}");
                 }
 
-                var json = await response.Content.ReadAsStringAsync(innerCt).ConfigureAwait(false);
-                var parsed = JsonSerializer.Deserialize<StockDiffResponse>(json)
+                // 流式反序列化：直接读响应流，省去整段 JSON 字符串的分配与二次解析
+                await using var stream = await response.Content.ReadAsStreamAsync(innerCt).ConfigureAwait(false);
+                var parsed = await JsonSerializer
+                    .DeserializeAsync<StockDiffResponse>(stream, cancellationToken: innerCt)
+                    .ConfigureAwait(false)
                     ?? throw new ApiException("获取库存差异失败: 响应为空");
 
                 if (parsed.Code != 0)
