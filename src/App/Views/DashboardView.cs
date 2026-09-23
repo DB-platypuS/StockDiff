@@ -1,9 +1,12 @@
 // 创建者: PlatyPus
 // 创建时间: 2026-09-22
-// 作用: 主面板视图（F4 数据查询与刷新 + F5 数据表格展示 + F7 CSV 导出），提供仓库/对比项筛选与刷新按钮，
-//       异步拉取库存差异并渲染 12 列表格；处理取消、登录失效与网络异常；单元格复制（F6）与导出 CSV（F7）已接入。
+// 作用: 主面板视图（F4 数据查询与刷新 + F5 数据表格展示 + F7 CSV 导出 + F8 会话管理），提供仓库/对比项筛选与刷新按钮，
+//       异步拉取库存差异并渲染 12 列表格；处理取消、登录失效与网络异常；单元格复制（F6）、导出 CSV（F7）已接入；
+//       左栏「设置」「退出登录」按钮与 401 自动回登录页由 F8 接线。
 
 using System.Diagnostics;
+using System.Globalization;
+using StockDiff.App.Dialogs;
 using StockDiff.App.Services;
 using StockDiff.Core.Api;
 using StockDiff.Core.Config;
@@ -11,6 +14,7 @@ using StockDiff.Core.Convert;
 using StockDiff.Core.Copy;
 using StockDiff.Core.Export;
 using StockDiff.Core.Models;
+using StockDiff.Core.Session;
 using StockDiff.Core.Table;
 
 namespace StockDiff.App.Views;
@@ -18,6 +22,12 @@ namespace StockDiff.App.Views;
 public sealed class DashboardView : UserControl
 {
     private readonly ApiClient _client;
+
+    // F8 会话管理：持有外壳与持久化存储，供「设置」对话框与退出登录跳转登录页使用
+    private readonly MainForm _mainForm;
+    private readonly IBaseUrlStore _store;
+    private readonly Button _settingsButton = new() { Text = "设置", Size = new Size(72, 32) };
+    private readonly Button _logoutButton = new() { Text = "退出登录", Size = new Size(88, 32) };
 
     // 仓库筛选标签：直接引用 Core 转换器的中文口径常量，避免同一字面量在 UI 与 Core 两处重复
     private const string AllLabel = Converters.LabelAll;
@@ -34,6 +44,12 @@ public sealed class DashboardView : UserControl
     private const int RowGap = 28;
     private const int HeaderButtonTop = 12;
     private const int AddressWrapWidth = 220;
+
+    // 状态栏时间格式：配合 InvariantCulture 渲染，避免自定义格式串受系统区域性日历影响
+    private const string TimeFormat = "HH:mm:ss";
+
+    // 空数据文案：表格浮层与状态栏共用，避免同一文案两处维护
+    private const string NoDataText = "无差异数据";
 
     private readonly RadioButton _allRadio = new() { Text = AllLabel, Checked = true, AutoSize = true };
     private readonly RadioButton _fcRadio = new() { Text = FcLabel, AutoSize = true };
@@ -62,13 +78,16 @@ public sealed class DashboardView : UserControl
     // F6 单元格复制：复制规则收口在 Core，视图只负责展示结果文案
     private readonly CellCopyService _cellCopy;
 
-    // 最近一次成功拉取的记录，供后续表格展示与导出模块复用
-    internal IReadOnlyList<StockDiffRow> Rows { get; private set; } = Array.Empty<StockDiffRow>();
+    // 最近一次成功拉取的记录（视图私有状态）：供表格填充、计数与 CSV 导出复用；
+    // 对外无消费者，故不暴露可见性，避免无谓的封装泄漏
+    private IReadOnlyList<StockDiffRow> Rows { get; set; } = Array.Empty<StockDiffRow>();
 
-    // 构建主面板：左右分栏（筛选区 + 数据区），并接入刷新按钮
-    public DashboardView(ApiClient client, string username)
+    // 构建主面板：左右分栏（筛选区 + 数据区），并接入刷新 / 设置 / 退出登录按钮
+    public DashboardView(ApiClient client, string username, MainForm mainForm, IBaseUrlStore store)
     {
         _client = client;
+        _mainForm = mainForm;
+        _store = store;
         Dock = DockStyle.Fill;
         BackColor = Color.White;
 
@@ -89,6 +108,8 @@ public sealed class DashboardView : UserControl
         _refreshButton.Click += OnRefreshClick;
         _exportButton.Click += OnExportClick;
         _grid.CellClick += OnCellClick;
+        _settingsButton.Click += OnSettingsClick;
+        _logoutButton.Click += OnLogoutClick;
         _cellCopy = new CellCopyService(new WinClipboard());
     }
 
@@ -104,26 +125,47 @@ public sealed class DashboardView : UserControl
         split.SplitterDistance = Math.Clamp((int)(split.Width * 0.2), split.Panel1MinSize, upper);
     }
 
-    // 左栏：用户名、仓库单选、对比选项复选；底部显示接口地址与版本号
+    // 左栏装配：用户名标题 + 仓库筛选 + 对比选项 + 页脚（地址 / 设置·退出按钮 / 版本号）
     private void BuildFilterPanel(Control panel, string username)
     {
-        panel.Controls.Add(new Label
-        {
-            Text = username,
-            Font = Theme.DialogTitleFont,
-            ForeColor = Theme.Ink,
-            AutoSize = true,
-            Location = new Point(PadX, TitleTop)
-        });
+        AddUserLabel(panel, username);
+        AddWarehouseSection(panel);
+        AddCompareSection(panel);
+        panel.Controls.Add(BuildFooter());
+    }
+
+    // 用户名标题（左栏顶部）
+    private static void AddUserLabel(Control panel, string username) => panel.Controls.Add(new Label
+    {
+        Text = username,
+        Font = Theme.DialogTitleFont,
+        ForeColor = Theme.Ink,
+        AutoSize = true,
+        Location = new Point(PadX, TitleTop)
+    });
+
+    // 仓库筛选单选：全部（默认）/ 方仓 / 立库
+    private void AddWarehouseSection(Control panel)
+    {
         panel.Controls.Add(Caption("仓库筛选", CaptionTop));
         _allRadio.Location = new Point(PadX, WarehouseFirstTop);
         _fcRadio.Location = new Point(PadX, WarehouseFirstTop + RowGap);
         _asrsRadio.Location = new Point(PadX, WarehouseFirstTop + RowGap * 2);
+        panel.Controls.AddRange(new Control[] { _allRadio, _fcRadio, _asrsRadio });
+    }
+
+    // 对比选项复选：冻结状态 / 过期日期
+    private void AddCompareSection(Control panel)
+    {
         panel.Controls.Add(Caption("对比选项", OptionsCaptionTop));
         _holdCheck.Location = new Point(PadX, OptionsFirstTop);
         _expiryCheck.Location = new Point(PadX, OptionsFirstTop + RowGap);
-        panel.Controls.AddRange(new Control[] { _allRadio, _fcRadio, _asrsRadio, _holdCheck, _expiryCheck });
+        panel.Controls.AddRange(new Control[] { _holdCheck, _expiryCheck });
+    }
 
+    // 页脚（停靠底部）：接口地址、设置/退出登录按钮行、版本号
+    private Control BuildFooter()
+    {
         var footer = new FlowLayoutPanel
         {
             Dock = DockStyle.Bottom,
@@ -132,6 +174,7 @@ public sealed class DashboardView : UserControl
             Padding = new Padding(PadX, 0, PadX, PadX),
             BackColor = Color.Transparent
         };
+
         footer.Controls.Add(new Label
         {
             Text = _client.BaseUrl,
@@ -140,6 +183,7 @@ public sealed class DashboardView : UserControl
             AutoSize = true,
             MaximumSize = new Size(AddressWrapWidth, 0)
         });
+        footer.Controls.Add(BuildSessionButtonRow());
         footer.Controls.Add(new Label
         {
             Text = $"v{AppConfig.Version}",
@@ -147,7 +191,32 @@ public sealed class DashboardView : UserControl
             ForeColor = Theme.Muted,
             AutoSize = true
         });
-        panel.Controls.Add(footer);
+
+        return footer;
+    }
+
+    // F8「设置」「退出登录」按钮行：横向排列，窄窗可自动换行。
+    // 两个按钮 Margin 必须一致，否则默认 3px 边距会让上边缘错开、视觉不齐平；
+    // 整行左右边距取 3px，与上方地址/版本标签（同为默认 3px）左边线对齐，避免按钮相对标签外凸
+    private Control BuildSessionButtonRow()
+    {
+        Theme.StyleSecondary(_settingsButton, Theme.BodyFont);
+        Theme.StyleSecondary(_logoutButton, Theme.BodyFont);
+        _settingsButton.Margin = new Padding(0, 0, 8, 0);
+        _logoutButton.Margin = new Padding(0);
+
+        var row = new FlowLayoutPanel
+        {
+            FlowDirection = FlowDirection.LeftToRight,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            WrapContents = true,
+            Margin = new Padding(3, 10, 3, 10),
+            BackColor = Color.Transparent
+        };
+        row.Controls.Add(_settingsButton);
+        row.Controls.Add(_logoutButton);
+        return row;
     }
 
     // 分组小标题：左栏统一左间距
@@ -160,8 +229,22 @@ public sealed class DashboardView : UserControl
         Location = new Point(PadX, y)
     };
 
-    // 右栏：标题、导出/刷新按钮、状态与计数、数据表格
+    // 右栏装配：顶部标题与按钮、底部状态行、中部数据表格
     private void BuildDataPanel(Control panel)
+    {
+        var header = BuildDataHeader();
+        var status = BuildStatusBar();
+        BuildGridHost();
+
+        // 填充区先加入，Top/Bottom 后加入，确保表格占据中部剩余空间
+        panel.Controls.Add(_gridHost);
+        panel.Controls.Add(header);
+        panel.Controls.Add(status);
+        CenterEmptyLabel();
+    }
+
+    // 顶栏：标题 + 刷新 / 导出按钮（按钮右对齐，随宿主宽度重算位置）
+    private Panel BuildDataHeader()
     {
         var header = new Panel { Dock = DockStyle.Top, Height = 56, BackColor = Color.White };
         header.Controls.Add(new Label
@@ -172,22 +255,30 @@ public sealed class DashboardView : UserControl
             AutoSize = true,
             Location = new Point(PadX, HeaderButtonTop)
         });
+
         Theme.StylePrimary(_refreshButton, Theme.BodyFont);
         _refreshButton.Size = new Size(96, 32);
         Theme.StyleSecondary(_exportButton, Theme.BodyFont);
         _exportButton.Size = new Size(96, 32);
         header.Controls.Add(_refreshButton);
         header.Controls.Add(_exportButton);
-        void PlaceButton()
-        {
-            _refreshButton.Location =
-                new Point(Math.Max(PadX, header.Width - _refreshButton.Width - PadX), HeaderButtonTop);
-            _exportButton.Location =
-                new Point(Math.Max(PadX, _refreshButton.Left - _exportButton.Width - 12), HeaderButtonTop);
-        }
-        header.Resize += (_, _) => PlaceButton();
-        PlaceButton();
+        header.Resize += (_, _) => PlaceHeaderButtons(header);
+        PlaceHeaderButtons(header);
+        return header;
+    }
 
+    // 顶栏按钮靠右排布：刷新最右、导出在其左侧；窄窗时回退左间距，避免坐标为负越出可视区
+    private void PlaceHeaderButtons(Panel header)
+    {
+        _refreshButton.Location =
+            new Point(Math.Max(PadX, header.Width - _refreshButton.Width - PadX), HeaderButtonTop);
+        _exportButton.Location =
+            new Point(Math.Max(PadX, _refreshButton.Left - _exportButton.Width - 12), HeaderButtonTop);
+    }
+
+    // 底栏：状态文字与记录数
+    private FlowLayoutPanel BuildStatusBar()
+    {
         var status = new FlowLayoutPanel
         {
             Dock = DockStyle.Bottom,
@@ -198,19 +289,18 @@ public sealed class DashboardView : UserControl
         _countLabel.Margin = new Padding(24, 0, 0, 0);
         status.Controls.Add(_statusLabel);
         status.Controls.Add(_countLabel);
+        return status;
+    }
 
+    // 中部：表格 + 空数据提示浮层
+    private void BuildGridHost()
+    {
         BuildGrid();
         _gridHost.Controls.Add(_grid);
         _gridHost.Controls.Add(_emptyLabel);
         // 后加入的控件处于 z 序底部，会被 Dock=Fill 的表格完全遮住，需提到最前才可见
         _emptyLabel.BringToFront();
         _gridHost.Resize += (_, _) => CenterEmptyLabel();
-
-        // 填充区先加入，Top/Bottom 后加入，确保表格占据中部剩余空间
-        panel.Controls.Add(_gridHost);
-        panel.Controls.Add(header);
-        panel.Controls.Add(status);
-        CenterEmptyLabel();
     }
 
     // 配置 12 列表格：只读、禁增删行/调行高、无行头、单元格选择；列顺序/对齐由 TableColumns 派生，
@@ -284,7 +374,7 @@ public sealed class DashboardView : UserControl
             SetColumnAutoSize(DataGridViewAutoSizeColumnMode.AllCells);
         }
 
-        _emptyLabel.Text = "无差异数据";
+        _emptyLabel.Text = NoDataText;
         _emptyLabel.Visible = model.IsEmpty;
         CenterEmptyLabel();
     }
@@ -333,7 +423,10 @@ public sealed class DashboardView : UserControl
             PopulateGrid(rows);
             UpdateExportEnabled();
             _countLabel.Text = $"{rows.Count} 条记录";
-            _statusLabel.Text = rows.Count > 0 ? $"更新时间: {DateTime.Now:HH:mm:ss}" : "无差异数据";
+            // 固定区域性：避免自定义格式串受当前区域性日历影响（非公历系统下时间显示异常）
+            _statusLabel.Text = rows.Count > 0
+                ? $"更新时间: {DateTime.Now.ToString(TimeFormat, CultureInfo.InvariantCulture)}"
+                : NoDataText;
         }
         catch (OperationCanceledException)
         {
@@ -341,9 +434,11 @@ public sealed class DashboardView : UserControl
         }
         catch (UnauthorizedException ex)
         {
-            // 登录失效：F4 仅提示，跳回登录页由 F8 会话模块接线
+            // 登录失效（F8 接线）：取消在途请求、清令牌、弹提示并跳回登录页
+            var outcome = LogoutDecider.FromException(ex);
             _statusLabel.ForeColor = Theme.Error;
-            _statusLabel.Text = ex.Message;
+            _statusLabel.Text = outcome.Message;
+            PerformLogout(outcome.Message);
         }
         catch (Exception ex)
         {
@@ -402,46 +497,17 @@ public sealed class DashboardView : UserControl
             return;
         }
 
-        using var dialog = new SaveFileDialog
-        {
-            Filter = "CSV 文件|*.csv",
-            DefaultExt = "csv",
-            FileName = CsvExporter.BuildDefaultFileName(CurrentWarehouseLabel())
-        };
-        if (dialog.ShowDialog(this) != DialogResult.OK)
+        var target = PickExportTarget();
+        if (target is null)
         {
             return;
         }
 
-        var target = dialog.FileName;
         var rows = Rows;
 
         try
         {
-            // 先写临时文件再原子替换：写失败既不残留半截文件，也不破坏已存在的同名文件；
-            // 导出为本地 IO，移到后台线程避免大数据量时阻塞界面
-            await Task.Run(() =>
-            {
-                var temp = target + ".tmp";
-                try
-                {
-                    using (var file = File.Create(temp))
-                    {
-                        CsvExporter.Write(file, rows);
-                    }
-
-                    File.Move(temp, target, overwrite: true);
-                }
-                catch
-                {
-                    if (File.Exists(temp))
-                    {
-                        File.Delete(temp);
-                    }
-
-                    throw;
-                }
-            });
+            await WriteCsvFileAsync(target, rows);
 
             if (IsDisposed)
             {
@@ -467,6 +533,83 @@ public sealed class DashboardView : UserControl
             MessageBox.Show(this, "导出失败，请检查目标文件是否被占用或磁盘空间是否充足。",
                 "导出失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
+    }
+
+    // 弹出保存对话框并返回用户选择的目标路径；用户取消时返回 null
+    private string? PickExportTarget()
+    {
+        using var dialog = new SaveFileDialog
+        {
+            Filter = "CSV 文件|*.csv",
+            DefaultExt = "csv",
+            FileName = CsvExporter.BuildDefaultFileName(CurrentWarehouseLabel())
+        };
+        return dialog.ShowDialog(this) == DialogResult.OK ? dialog.FileName : null;
+    }
+
+    // 后台线程写盘：先写临时文件再原子替换（写失败既不残留半截文件，也不破坏已存在的同名文件）；
+    // 导出为本地 IO，移到后台线程避免大数据量时阻塞界面；异常原样抛出，由调用方统一提示
+    private static Task WriteCsvFileAsync(string target, IReadOnlyList<StockDiffRow> rows) => Task.Run(() =>
+    {
+        var temp = target + AppConfig.TempFileSuffix;
+        try
+        {
+            using (var file = File.Create(temp))
+            {
+                CsvExporter.Write(file, rows);
+            }
+
+            File.Move(temp, target, overwrite: true);
+        }
+        catch
+        {
+            if (File.Exists(temp))
+            {
+                File.Delete(temp);
+            }
+
+            throw;
+        }
+    });
+
+    // 「设置」（F8）：打开接口地址对话框；保存成功则地址已变更且令牌已清空，须退出重新登录
+    private void OnSettingsClick(object? sender, EventArgs e)
+    {
+        using var dialog = new SettingsForm(_client, _store);
+        dialog.ShowDialog(this);
+
+        if (dialog.Saved)
+        {
+            PerformLogout(LogoutDecider.FromSettingsSaved().Message);
+        }
+    }
+
+    // 「退出登录」（F8）：清令牌并切回登录页
+    private void OnLogoutClick(object? sender, EventArgs e) =>
+        PerformLogout(LogoutDecider.FromManualLogout().Message);
+
+    // 退出登录（F8）：取消在途请求 → 清空令牌 → 弹提示 → 跳回登录页
+    // 在途请求的 finally 会自行释放其 CTS，此处只取消并断开引用，避免释放正在使用的令牌源；
+    // 跳转后当前视图被外壳 Dispose，调用方（如刷新 catch 的 finally）须以 ReferenceEquals 守卫避免触碰已释放控件
+    private void PerformLogout(string message)
+    {
+        if (IsDisposed)
+        {
+            return;
+        }
+
+        _refreshCts?.Cancel();
+        _refreshCts = null;
+        _client.ClearToken();
+        MessageBox.Show(this, message, "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+
+        // 弹窗期间视图可能被外部销毁（理论上不会，保留守卫以防意外），销毁则不再切视图
+        if (IsDisposed)
+        {
+            return;
+        }
+
+        _mainForm.ShowLogin();
     }
 
     // 当前仓库筛选的中文标签，供导出默认文件名复用（不改变请求代码口径）

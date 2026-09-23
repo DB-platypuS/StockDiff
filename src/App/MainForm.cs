@@ -35,8 +35,10 @@ public sealed class MainForm : Form
     // 切换到登录页（未登录 / 退出登录 / 令牌过期时调用）
     public void ShowLogin() => ShowView(new LoginView(this, _client, _settingsStore));
 
-    // 登录成功后切换到主面板，注入共享 ApiClient 与用户名，供数据查询与刷新使用
-    public void ShowDashboard(string username) => ShowView(new DashboardView(_client, username));
+    // 登录成功后切换到主面板，注入共享 ApiClient 与用户名、外壳与持久化存储，
+    // 供数据查询刷新、F8 设置对话框与退出登录跳转登录页使用
+    public void ShowDashboard(string username) =>
+        ShowView(new DashboardView(_client, username, this, _settingsStore));
 
     // 视图切换：先释放旧视图，再装载新视图并铺满内容区
     private void ShowView(UserControl view)

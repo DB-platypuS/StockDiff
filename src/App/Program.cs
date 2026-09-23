@@ -30,7 +30,7 @@ internal static class Program
             var dir = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
                 AppConfig.DataDirName,
-                "logs");
+                AppConfig.LogDirName);
             Directory.CreateDirectory(dir);
 
             var logFile = Path.Combine(dir, AppConfig.LogFileName);

@@ -57,7 +57,11 @@ public static class CsvExporter
     public static string BuildDefaultFileName(string? warehouseLabel)
     {
         var label = string.IsNullOrWhiteSpace(warehouseLabel) ? Converters.LabelAll : warehouseLabel;
-        return $"{DateTime.Now:yyyyMMdd_HHmmss}_{label}&WMS差异情况.csv";
+
+        // 固定区域性：自定义格式串会随当前区域性日历变化（如佛历/回历系统年份偏移），
+        // 不固定会在非公历系统上生成错误年份，故显式使用 InvariantCulture 得到稳定 ASCII 日期
+        var stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss", CultureInfo.InvariantCulture);
+        return $"{stamp}_{label}&WMS差异情况.csv";
     }
 
     // 逐列判定是否「全空」：该列在任意一行有非空值即保留；若所有列都空则保留全部列，避免只剩空表头

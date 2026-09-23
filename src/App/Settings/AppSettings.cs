@@ -33,7 +33,7 @@ public static class AppSettings
     }
 
     // 配置文件路径：settings.json
-    private static string SettingsFile => Path.Combine(Dir, "settings.json");
+    private static string SettingsFile => Path.Combine(Dir, AppConfig.SettingsFileName);
 
     // 接口地址：读时归一化并兜底默认值；写时归一化后立即落盘
     public static string BaseUrl
@@ -102,7 +102,7 @@ public static class AppSettings
         {
             Directory.CreateDirectory(Dir);
             var json = JsonSerializer.Serialize(new SettingsData { BaseUrl = AppConfig.NormalizeBaseUrl(_baseUrl) });
-            var temp = SettingsFile + ".tmp";
+            var temp = SettingsFile + AppConfig.TempFileSuffix;
             File.WriteAllText(temp, json, Encoding.UTF8);
             File.Move(temp, SettingsFile, overwrite: true);
             return true;

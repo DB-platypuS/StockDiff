@@ -16,6 +16,13 @@ public static class AppConfig
     // 本地数据目录名：配置（settings.json）与日志（logs/）共用，避免字面量在 App 层多处重复
     public const string DataDirName = "kc-stock-diff";
 
+    // 配置文件与日志目录名：均位于数据目录下，集中定义避免字面量在 App 层散落
+    public const string SettingsFileName = "settings.json";
+    public const string LogDirName = "logs";
+
+    // 原子写临时文件后缀：先写 xxx.tmp 再原子替换，避免进程中断留下半截文件（配置与导出共用）
+    public const string TempFileSuffix = ".tmp";
+
     // 日志文件名与单文件上限（2MB）：超出则轮转为 app.log.1，避免长期运行无限增长
     public const string LogFileName = "app.log";
     public const long LogMaxBytes = 2 * 1024 * 1024;

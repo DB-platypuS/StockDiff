@@ -1,7 +1,8 @@
 // 创建者: PlatyPus
 // 创建时间: 2026-09-22
 // 作用: F4 受保护接口端到端集成测试，以真实回环 HTTP 服务端驱动「登录 → 携带令牌拉取库存差异」全链路，
-//       验证令牌透传、查询串拼装、JSON 反序列化与 401 会话失效的真实往返行为（非 stub）。
+//       验证令牌透传、查询串拼装、JSON 反序列化与 401 会话失效的真实往返行为（非 stub）；
+//       并覆盖 F8 会话链路：会话失效 → 令牌清空 → 退出决策成立 → 再次拉取在本地即被拦截。
 
 using System.Diagnostics;
 using System.Net;
@@ -9,6 +10,7 @@ using System.Net.Sockets;
 using System.Text;
 using StockDiff.Core.Api;
 using StockDiff.Core.Convert;
+using StockDiff.Core.Session;
 using StockDiff.Core.Table;
 using Xunit;
 
@@ -65,6 +67,54 @@ public sealed class FetchIntegrationTests
         await Assert.ThrowsAsync<UnauthorizedException>(
             () => client.FetchStockDiffAsync("all", false, false));
 
+        Assert.Equal("", client.Token);
+    }
+
+    [Fact]
+    // 端到端（F8 会话链路）：登录 → 受保护接口 401 → 令牌清空 + 退出决策成立（UI 据此回登录页）
+    // → 再次拉取在本地即被拦截，不再命中服务端（会话已失效，必须重新登录）
+    public async Task Login_Then401_LogoutDecisionFiresAndRequiresRelogin_EndToEnd()
+    {
+        using var server = new LoopbackRouter(new()
+        {
+            ["/api/v1/auth/login"] = (200, LoginBody),
+            ["/api/v1/stock/diff"] = (401, "{}")
+        });
+        var client = new ApiClient(server.BaseUrl);
+
+        await client.LoginAsync("000", "0000");
+        var ex = await Assert.ThrowsAsync<UnauthorizedException>(
+            () => client.FetchStockDiffAsync("all", false, false));
+
+        var outcome = LogoutDecider.FromException(ex);
+
+        Assert.True(outcome.ShouldLogout);
+        Assert.False(string.IsNullOrWhiteSpace(outcome.Message));
+        Assert.Equal("", client.Token);
+
+        var again = await Assert.ThrowsAsync<UnauthorizedException>(
+            () => client.FetchStockDiffAsync("all", false, false));
+
+        Assert.Equal("请先登录", again.Message);
+        Assert.Single(server.Captured, r => r.Path == "/api/v1/stock/diff");
+    }
+
+    [Fact]
+    // 端到端（F8 会话链路）：HTTP 200 但业务码 403 / message 含 token → 同样判定会话失效、清空令牌并触发退出决策
+    public async Task Login_ThenBusinessAuthFailure_LogoutDecisionFires_EndToEnd()
+    {
+        using var server = new LoopbackRouter(new()
+        {
+            ["/api/v1/auth/login"] = (200, LoginBody),
+            ["/api/v1/stock/diff"] = (200, """{"code":403,"message":"token expired","data":null}""")
+        });
+        var client = new ApiClient(server.BaseUrl);
+
+        await client.LoginAsync("000", "0000");
+        var ex = await Assert.ThrowsAsync<UnauthorizedException>(
+            () => client.FetchStockDiffAsync("fc", true, true));
+
+        Assert.True(LogoutDecider.FromException(ex).ShouldLogout);
         Assert.Equal("", client.Token);
     }
 

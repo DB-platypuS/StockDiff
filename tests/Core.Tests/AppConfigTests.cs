@@ -35,6 +35,17 @@ public sealed class AppConfigTests
     }
 
     [Fact]
+    // 锁定数据目录下的文件名与后缀契约（配置文件名 / 日志目录名 / 原子写临时后缀）
+    public void DataFileConstants_MatchContract()
+    {
+        Assert.Equal("kc-stock-diff", AppConfig.DataDirName);
+        Assert.Equal("settings.json", AppConfig.SettingsFileName);
+        Assert.Equal("logs", AppConfig.LogDirName);
+        Assert.Equal(".tmp", AppConfig.TempFileSuffix);
+        Assert.Equal("app.log", AppConfig.LogFileName);
+    }
+
+    [Fact]
     // 锁定三个超时值：登录 20s / 拉取 60s / 连接测试 5s
     public void Timeouts_MatchContract()
     {
