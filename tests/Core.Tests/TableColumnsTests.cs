@@ -70,7 +70,7 @@ public sealed class TableColumnsTests
 
     [Theory]
     [InlineData(0, "AC04672026013030856")]
-    [InlineData(1, "数量不一致")]
+    [InlineData(1, "数量差异")]
     [InlineData(2, "方仓")]
     [InlineData(3, "2640")]
     [InlineData(4, "2641")]

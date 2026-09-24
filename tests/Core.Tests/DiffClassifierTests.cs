@@ -14,6 +14,8 @@ public sealed class DiffClassifierTests
 {
     [Theory]
     [InlineData("数量不一致", DiffKind.Quantity)]
+    [InlineData("仅WMS存在", DiffKind.Quantity)]
+    [InlineData("仅立库存在", DiffKind.Quantity)]
     [InlineData("储位不一致", DiffKind.Location)]
     [InlineData("WMS库位不一致", DiffKind.Location)]
     [InlineData("冻结状态不一致", DiffKind.Hold)]
@@ -48,6 +50,49 @@ public sealed class DiffClassifierTests
     {
         Assert.Equal(DiffKind.None, DiffClassifier.Classify(new StockDiffRow()));
         Assert.Equal(DiffKind.None, DiffClassifier.Classify(null));
+    }
+
+    [Fact]
+    // 数量优先：后端把「一侧为 0」标为「仅WMS存在」，只要两来源数量不等即归数量差异
+    public void Classify_OneSidedStock_IsQuantity()
+    {
+        var row = new StockDiffRow
+        {
+            DiffType = "仅WMS存在",
+            WarehouseQty = Number("0"),
+            WmsQty = Number("1500"),
+            QtyDiff = Number("-1500")
+        };
+
+        Assert.Equal(DiffKind.Quantity, DiffClassifier.Classify(row));
+    }
+
+    [Fact]
+    // 数量优先：两来源数量不等时，后端给出的储位类文本不得掩盖数量差异
+    public void Classify_QuantityMismatch_OverridesOtherTypeText()
+    {
+        var row = new StockDiffRow
+        {
+            DiffType = "储位不一致",
+            WarehouseQty = Number("0"),
+            WmsQty = Number("1500"),
+            Location = "3-21-1-2",
+            WarehouseNo = "3-21-1-2"
+        };
+
+        Assert.Equal(DiffKind.Quantity, DiffClassifier.Classify(row));
+    }
+
+    [Fact]
+    // 分类中文标签：与「异常类型」筛选项文案同源，None 无标签
+    public void KindLabel_MapsAllKinds()
+    {
+        Assert.Equal("数量差异", DiffClassifier.KindLabel(DiffKind.Quantity));
+        Assert.Equal("储位差异", DiffClassifier.KindLabel(DiffKind.Location));
+        Assert.Equal("冻结差异", DiffClassifier.KindLabel(DiffKind.Hold));
+        Assert.Equal("效期差异", DiffClassifier.KindLabel(DiffKind.Expiry));
+        Assert.Equal("其他异常", DiffClassifier.KindLabel(DiffKind.Other));
+        Assert.Equal("", DiffClassifier.KindLabel(DiffKind.None));
     }
 
     [Fact]

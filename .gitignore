@@ -10,3 +10,6 @@ obj/
 *.suo
 TestResults/
 publish/
+
+# 本地私有构建配置（可能含内网接口地址等敏感值），仅供本机发布时注入
+Directory.Build.local.props

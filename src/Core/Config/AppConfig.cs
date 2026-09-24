@@ -13,6 +13,9 @@ public static class AppConfig
     public const string AppName = "库存差异比对系统";
     public const string BaseUrlEnvVar = "KC_STOCKDIFF_BASE_URL";
 
+    // 编译期注入的本地私有默认地址所在的程序集元数据键（由未提交的 Directory.Build.local.props 提供）
+    public const string LocalDefaultBaseUrlKey = "StockDiffDefaultBaseUrl";
+
     // 本地数据目录名：配置（settings.json）与日志（logs/）共用，避免字面量在 App 层多处重复
     public const string DataDirName = "kc-stock-diff";
 
@@ -37,6 +40,15 @@ public static class AppConfig
         (Assembly.GetEntryAssembly() ?? Assembly.GetExecutingAssembly())
             .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
             .InformationalVersion.Split('+')[0] ?? "0.0.0";
+
+    // 本地私有默认接口地址：取入口程序集元数据中由发布方注入的内网地址；
+    // 未注入（他人克隆源码 / 跑单测 / 未配置本地文件）时返回 null，由调用方回退 DefaultBaseUrl
+    public static string? LocalDefaultBaseUrl =>
+        (Assembly.GetEntryAssembly() ?? Assembly.GetExecutingAssembly())
+            .GetCustomAttributes<AssemblyMetadataAttribute>()
+            .FirstOrDefault(a => a.Key == LocalDefaultBaseUrlKey)?.Value is { Length: > 0 } raw
+            ? raw.Trim()
+            : null;
 
     // 归一化接口地址：去首尾空白，为空时兜底默认地址
     public static string NormalizeBaseUrl(string? raw) =>

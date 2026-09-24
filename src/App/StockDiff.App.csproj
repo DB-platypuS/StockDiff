@@ -12,11 +12,20 @@
     <UseWindowsForms>true</UseWindowsForms>
     <RootNamespace>StockDiff.App</RootNamespace>
     <AssemblyName>StockDiff</AssemblyName>
-    <Version>1.1.0</Version>
+    <Version>1.1.1</Version>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <ApplicationDefaultFont>Microsoft YaHei UI, 9pt</ApplicationDefaultFont>
   </PropertyGroup>
+
+  <!-- 本地私有默认接口地址：由未提交的 Directory.Build.local.props 提供；
+       注入为程序集元数据，运行期由 AppConfig.LocalDefaultBaseUrl 读取 -->
+  <ItemGroup Condition="'$(StockDiffDefaultBaseUrl)' != ''">
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>StockDiffDefaultBaseUrl</_Parameter1>
+      <_Parameter2>$(StockDiffDefaultBaseUrl)</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
 
   <ItemGroup>
     <InternalsVisibleTo Include="App.Tests" />

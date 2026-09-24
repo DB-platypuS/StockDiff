@@ -19,7 +19,7 @@ public static class TableColumns
     public static readonly IReadOnlyList<TableColumn> Columns = new[]
     {
         new TableColumn("物料编码", 180, ColumnAlign.Left,  r => r.MaterialCode),
-        new TableColumn("异常种类", 120, ColumnAlign.Left,  r => r.DiffType),
+        new TableColumn("异常种类", 120, ColumnAlign.Left,  r => DiffClassifier.KindLabel(DiffClassifier.Classify(r))),
         new TableColumn("仓库类型",  80, ColumnAlign.Left,  r => Converters.WarehouseLabelFromCode(r.WarehouseType)),
         new TableColumn("仓库数量",  90, ColumnAlign.Left,  r => Converters.NumberToString(r.WarehouseQty)),
         new TableColumn("WMS数量",   90, ColumnAlign.Left,  r => Converters.NumberToString(r.WmsQty)),

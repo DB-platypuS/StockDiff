@@ -26,22 +26,22 @@ public sealed class CsvExporterTests
     // 正常：表头与数据行由 TableColumns 派生，仓库类型经转换器输出中文
     public void Write_WritesHeaderAndDataRecords()
     {
-        var (_, _, records) = Export(new[] { Row(code: "AC001", diffType: "差异") });
+        var (_, _, records) = Export(new[] { Row(code: "AC001", diffType: "储位不一致") });
 
         Assert.Equal("物料编码,异常种类,仓库类型", records[0]);
-        Assert.Equal("AC001,差异,全部", records[1]);
+        Assert.Equal("AC001,储位差异,全部", records[1]);
         Assert.Equal(2, records.Length);
     }
 
     [Fact]
-    // 边界：整列无值被过滤，部分有值的列保留，缺值单元格留空
+    // 边界：整列无值被过滤（仓库数量等），部分有值的列保留，缺值单元格留空
     public void Write_EmptyColumnFiltered_NonEmptyColumnKept()
     {
         var (_, _, records) = Export(new[] { Row(code: "A"), Row(location: "L1") });
 
-        Assert.Equal("物料编码,仓库类型,储位", records[0]);
-        Assert.Equal("A,全部,", records[1]);
-        Assert.Equal(",全部,L1", records[2]);
+        Assert.Equal("物料编码,异常种类,仓库类型,储位", records[0]);
+        Assert.Equal("A,,全部,", records[1]);
+        Assert.Equal(",储位差异,全部,L1", records[2]);
     }
 
     [Fact]

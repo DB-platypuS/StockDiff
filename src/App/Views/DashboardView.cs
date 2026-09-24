@@ -69,8 +69,17 @@ public sealed class DashboardView : UserControl
     // 统计摘要卡片数值标签（差异物料数）
     private readonly Label _statDiffValue = new();
 
-    // 异常类型筛选项：标签与分类一一对应（首项 null 表示不限制类型）
-    private static readonly string[] DiffTypeLabels = { "全部类型", "数量差异", "储位差异", "冻结差异", "效期差异", "其他异常" };
+    // 异常类型筛选项：标签与分类一一对应（首项 null 表示不限制类型）；
+    // 文案与「异常种类」列同源，统一取 Core 的 KindLabel，避免字面量两处维护
+    private static readonly string[] DiffTypeLabels =
+    {
+        "全部类型",
+        DiffClassifier.KindLabel(DiffKind.Quantity),
+        DiffClassifier.KindLabel(DiffKind.Location),
+        DiffClassifier.KindLabel(DiffKind.Hold),
+        DiffClassifier.KindLabel(DiffKind.Expiry),
+        DiffClassifier.KindLabel(DiffKind.Other)
+    };
     private static readonly DiffKind?[] DiffTypeKinds = { null, DiffKind.Quantity, DiffKind.Location, DiffKind.Hold, DiffKind.Expiry, DiffKind.Other };
 
     // 仓库类型筛选项：标签与仓库代码一一对应（首项 null 表示不限制仓库）

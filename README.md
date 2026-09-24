@@ -43,6 +43,43 @@ StockDiff/
 
 ```
 
+## 部署与分发
+
+面向使用同事（无需安装 .NET 运行时、无需 IDE）：在构建机执行一次发布脚本，
+产出免运行时依赖的 Windows x64 单文件程序，压缩包直接发给同事解压双击即用。
+
+```powershell
+.\scripts\publish.ps1        # 产出 publish\StockDiff-win-x64\StockDiff.exe 与 publish\StockDiff-win-x64.zip
+```
+
+- **分发内容**：`publish\StockDiff-win-x64.zip`（内含单个 `StockDiff.exe`，约 60~150MB）
+- **同事侧要求**：Windows 10 / 11 x64，能访问后端接口即可
+- **无需管理员权限**：配置与日志写入 `%AppData%\kc-stock-diff\`
+- **升级**：替换 exe 即可，用户已保存的接口地址不受影响
+
+### 默认接口地址的内网注入
+
+源码内置默认值 `http://127.0.0.1:7880` 不代表真实环境，也不应将内网地址提交入库。
+发布方在内网构建时，于本机新建 **未纳入版本库** 的 `Directory.Build.local.props`：
+
+```xml
+<Project>
+  <PropertyGroup>
+    <StockDiffDefaultBaseUrl>http://内网地址:端口</StockDiffDefaultBaseUrl>
+  </PropertyGroup>
+</Project>
+```
+
+该文件已被 `.gitignore` 忽略，其值在编译期以 `AssemblyMetadata` 注入，不会出现在源码里。
+启动时的接口地址优先级为：
+
+1. `%AppData%\kc-stock-diff\settings.json`（用户在「API 设置」里的显式设置）
+2. 环境变量 `KC_STOCKDIFF_BASE_URL`
+3. 编译期注入的本地默认地址（`Directory.Build.local.props`）
+4. 源码内置默认值 `http://127.0.0.1:7880`
+
+未提供第 3 项时程序行为与改动前完全一致（他人克隆源码、CI 与单元测试均不受影响）。
+
 ## 接口与配置
 
 - 默认接口地址 `http://127.0.0.1:7880` ，路径前缀 `/api/v1`
@@ -54,6 +91,11 @@ StockDiff/
 模块清单、依赖关系与逐项完成状态见 [模块划分.md](./模块划分.md)。
 
 ## 更新日志
+
+### v1.1.1
+
+- **差异归类修正**：只要「仓库数量」与「WMS数量」不一致，一律归为「数量差异」；修复后端返回「仅WMS存在 / 仅立库存在」等非标准文本时该行被归入「其他异常」、导致「数量差异」筛选漏掉的问题。
+- **异常种类列口径统一**：该列由展示后端原始文本改为展示归一化分类（数量差异 / 储位差异 / 冻结差异 / 效期差异 / 其他异常），与「异常类型」筛选口径一致，CSV 导出同步。
 
 ### v1.1.0
 

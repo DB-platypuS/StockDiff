@@ -43,7 +43,8 @@ public static class DiffClassifier
     // 列下标 → 成对列下标（-1 表示不属于任何配对）；由表头文本一次性解析，列序调整后自动跟随
     public static readonly IReadOnlyList<int> ColumnToPair = BuildColumnToPair();
 
-    // 归一分类：按关键词匹配 diff_type；空串有差值归数量差异，否则按成对列首个不一致项兜底
+    // 归一分类：数量差异优先（两来源数量不等或差值非零），再按关键词匹配 diff_type，
+    // 最后按成对列首个不一致项兜底，避免漏标
     public static DiffKind Classify(StockDiffRow? row)
     {
         if (row is null)
@@ -51,19 +52,25 @@ public static class DiffClassifier
             return DiffKind.None;
         }
 
+        // 数量优先：只要仓库数量与 WMS 数量不等，一律归数量差异，不被后端其他自由文本掩盖
+        if (IsNonZero(row.QtyDiff) || HasMismatch(row, Pairs[0]))
+        {
+            return DiffKind.Quantity;
+        }
+
         var type = (row.DiffType ?? "").Trim();
         if (type.Length > 0)
         {
-            if (type.Contains("数量")) return DiffKind.Quantity;
+            // 数量类文本：明确的数量不一致，以及「仅WMS存在 / 仅立库存在」——后者一侧数量为 0，本质即数量差异
+            if (type.Contains("数量") || type.Contains("仅WMS存在") || type.Contains("仅立库存在"))
+            {
+                return DiffKind.Quantity;
+            }
+
             if (type.Contains("储位") || type.Contains("库位")) return DiffKind.Location;
             if (type.Contains("冻结")) return DiffKind.Hold;
             if (type.Contains("效期") || type.Contains("过期")) return DiffKind.Expiry;
             return DiffKind.Other;
-        }
-
-        if (IsNonZero(row.QtyDiff))
-        {
-            return DiffKind.Quantity;
         }
 
         // diff_type 缺失：按成对列首个不一致项兜底，避免漏标
@@ -85,6 +92,17 @@ public static class DiffClassifier
         DiffKind.Location or DiffKind.Hold => DiffSeverity.Warning,
         DiffKind.Expiry or DiffKind.Other => DiffSeverity.Notice,
         _ => DiffSeverity.Normal
+    };
+
+    // 分类中文标签：「异常种类」列与「异常类型」筛选项共用同一文案来源，避免字面量两处维护
+    public static string KindLabel(DiffKind kind) => kind switch
+    {
+        DiffKind.Quantity => "数量差异",
+        DiffKind.Location => "储位差异",
+        DiffKind.Hold => "冻结差异",
+        DiffKind.Expiry => "效期差异",
+        DiffKind.Other => "其他异常",
+        _ => ""
     };
 
     // 是否差异行：分类非 None（成对列不一致已在 Classify 中兜底为对应类别）

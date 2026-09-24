@@ -68,11 +68,13 @@ public static class AppSettings
         }
     }
 
-    // 解析启动地址：本地持久化（用户显式设置）优先于环境变量；均无值时返回 null，
-    // 由 BaseUrl 的 getter 兜底默认地址。优先级规则统一由 Core 的 BaseUrlSetter 承载。
+    // 解析启动地址：本地持久化（用户显式设置）> 环境变量 > 发布时注入的本地默认地址；
+    // 均无值时返回 null，由 BaseUrl 的 getter 兜底内置默认地址。
+    // 前两级优先级规则统一由 Core 的 BaseUrlSetter 承载。
     private static string? ResolvePersistedOrEnv() =>
         BaseUrlSetter.ResolveStartupBaseUrl(
-            ReadPersisted(), Environment.GetEnvironmentVariable(AppConfig.BaseUrlEnvVar));
+            ReadPersisted(), Environment.GetEnvironmentVariable(AppConfig.BaseUrlEnvVar))
+        ?? AppConfig.LocalDefaultBaseUrl;
 
     // 读取本地配置；文件不存在或内容损坏时返回 null 并记录日志
     private static string? ReadPersisted()
