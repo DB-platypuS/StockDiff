@@ -28,6 +28,18 @@ internal static class Theme
     public static readonly Font LoginButtonFont = new("Microsoft YaHei UI", 10F, FontStyle.Bold);
     public static readonly Font DialogButtonFont = new("Microsoft YaHei UI", 9.5F, FontStyle.Bold);
 
+    // 表格字体：表头粗体、内容常规、关键数字等宽（Consolas 数字等宽，便于纵向核对）
+    public static readonly Font GridHeaderFont = new("Microsoft YaHei UI", 9F, FontStyle.Bold);
+    public static readonly Font GridBodyFont = new("Microsoft YaHei UI", 9F);
+    public static readonly Font GridMonoFont = new("Consolas", 10F, FontStyle.Bold);
+
+    // 统计摘要字体：卡片小标题常规、数值大号粗体
+    public static readonly Font StatCaptionFont = new("Microsoft YaHei UI", 9F);
+    public static readonly Font StatValueFont = new("Microsoft YaHei UI", 16F, FontStyle.Bold);
+
+    // 筛选栏字体：工具栏标签与下拉框，加大字号便于阅读（下拉高度随字号增大）
+    public static readonly Font FilterFont = new("Microsoft YaHei UI", 11F);
+
     // 主按钮样式：蓝色实底、无边框、悬停加深
     public static void StylePrimary(Button button, Font font)
     {

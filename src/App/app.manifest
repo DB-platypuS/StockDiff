@@ -6,7 +6,7 @@
         高 DPI 感知由 csproj 的 ApplicationHighDpiMode 统一配置，此处不再重复声明，避免 WFO0003 构建告警。
 -->
 <assembly manifestVersion="1.0" xmlns="urn:schemas-microsoft-com:asm.v1">
-  <assemblyIdentity version="1.0.1.0" name="StockDiff.app" />
+  <assemblyIdentity version="1.1.0.0" name="StockDiff.app" />
 
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v2">
     <security>

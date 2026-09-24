@@ -30,36 +30,58 @@ public sealed class DashboardView : UserControl
     private readonly Button _logoutButton = new() { Text = "退出登录", Size = new Size(88, 32) };
 
     // 仓库筛选标签：直接引用 Core 转换器的中文口径常量，避免同一字面量在 UI 与 Core 两处重复
-    private const string AllLabel = Converters.LabelAll;
     private const string FcLabel = Converters.LabelFc;
     private const string AsrsLabel = Converters.LabelAsrs;
 
-    // 左栏与顶栏布局常量：统一左间距/行距，避免坐标魔数散落
+    // 布局常量：统一左间距，避免坐标魔数散落
     private const int PadX = 16;
     private const int TitleTop = 20;
-    private const int CaptionTop = 64;
-    private const int WarehouseFirstTop = 90;
-    private const int OptionsCaptionTop = 186;
-    private const int OptionsFirstTop = 212;
-    private const int RowGap = 28;
-    private const int HeaderButtonTop = 12;
     private const int AddressWrapWidth = 220;
+
+    // 右栏五行高度：标题 / 工具栏 / 统计 / 状态栏固定，表格行（Percent 100）自适应；
+    // 工具栏 32px 足以容纳含下拉框的 ToolStrip，避免行高不足导致工具栏项被裁切
+    private const int TitleBarHeight = 52;
+    private const int ToolbarHeight = 44;
+    private const int StatsHeight = 84;
+    private const int StatusHeight = 26;
 
     // 状态栏时间格式：配合 InvariantCulture 渲染，避免自定义格式串受系统区域性日历影响
     private const string TimeFormat = "HH:mm:ss";
 
-    // 空数据文案：表格浮层与状态栏共用，避免同一文案两处维护
+    // 空数据 / 加载中浮层文案：集中定义，避免同一文案多处维护
     private const string NoDataText = "无差异数据";
+    private const string LoadingText = "正在加载…";
 
-    private readonly RadioButton _allRadio = new() { Text = AllLabel, Checked = true, AutoSize = true };
-    private readonly RadioButton _fcRadio = new() { Text = FcLabel, AutoSize = true };
-    private readonly RadioButton _asrsRadio = new() { Text = AsrsLabel, AutoSize = true };
-    private readonly CheckBox _holdCheck = new() { Text = "对比冻结状态", AutoSize = true };
-    private readonly CheckBox _expiryCheck = new() { Text = "对比过期日期", AutoSize = true };
+    // 左栏数据操作按钮：刷新 / 导出（导出仍输出 CSV，仅按钮文案调整）
     private readonly Button _refreshButton = new() { Text = "刷新数据" };
-    private readonly Button _exportButton = new() { Text = "导出 CSV", Enabled = false };
-    private readonly Label _statusLabel = new() { Text = "等待刷新", AutoSize = true, ForeColor = Theme.Muted };
-    private readonly Label _countLabel = new() { Text = "0 条记录", AutoSize = true, ForeColor = Theme.Muted };
+    private readonly Button _exportButton = new() { Text = "导出 Excel", Enabled = false };
+    private readonly ToolStripComboBox _diffTypeFilter = new() { DropDownStyle = ComboBoxStyle.DropDownList };
+    // 仓库类型筛选（内存投影，不触发接口请求）
+    private readonly ToolStripComboBox _warehouseFilter = new() { DropDownStyle = ComboBoxStyle.DropDownList };
+
+    // 状态栏分段：消息 / 行数 / 筛选条件 / 耗时 / 更新时间
+    private readonly ToolStripStatusLabel _statusLabel = new() { Text = "等待刷新", ForeColor = Theme.Muted };
+    private readonly ToolStripStatusLabel _countLabel = new() { Text = "0 行", ForeColor = Theme.Muted };
+    private readonly ToolStripStatusLabel _filterLabel = new() { Text = "", ForeColor = Theme.Muted };
+    private readonly ToolStripStatusLabel _elapsedLabel = new() { Text = "耗时: -", ForeColor = Theme.Muted };
+    private readonly ToolStripStatusLabel _updatedLabel = new() { Text = "更新: -", ForeColor = Theme.Muted };
+
+    // 统计摘要卡片数值标签（差异物料数）
+    private readonly Label _statDiffValue = new();
+
+    // 异常类型筛选项：标签与分类一一对应（首项 null 表示不限制类型）
+    private static readonly string[] DiffTypeLabels = { "全部类型", "数量差异", "储位差异", "冻结差异", "效期差异", "其他异常" };
+    private static readonly DiffKind?[] DiffTypeKinds = { null, DiffKind.Quantity, DiffKind.Location, DiffKind.Hold, DiffKind.Expiry, DiffKind.Other };
+
+    // 仓库类型筛选项：标签与仓库代码一一对应（首项 null 表示不限制仓库）
+    private static readonly string[] WarehouseLabels = { "全部仓库", FcLabel, AsrsLabel };
+    private static readonly string?[] WarehouseCodes = { null, Converters.WarehouseCodeFromLabel(FcLabel), Converters.WarehouseCodeFromLabel(AsrsLabel) };
+
+    // 数据加载耗时计时器
+    private readonly Stopwatch _loadStopwatch = new();
+
+    // 当前视图投影（经异常类型 / 只看差异筛选后的行），导出仍使用全量 Rows
+    private List<StockDiffRow> _viewRows = new();
 
     // F5 数据表格：只读 DataGridView（12 列）与空数据提示浮层
     private readonly DataGridView _grid = new();
@@ -74,6 +96,9 @@ public sealed class DashboardView : UserControl
 
     // 每次刷新前取消上一次在途请求，保证仅最新请求的结果被采用
     private CancellationTokenSource? _refreshCts;
+
+    // 悬停行下标（-1 表示无）：CellFormatting 据此高亮整行；仅重绘变化的两行
+    private int _hoverRow = -1;
 
     // F6 单元格复制：复制规则收口在 Core，视图只负责展示结果文案
     private readonly CellCopyService _cellCopy;
@@ -108,6 +133,10 @@ public sealed class DashboardView : UserControl
         _refreshButton.Click += OnRefreshClick;
         _exportButton.Click += OnExportClick;
         _grid.CellClick += OnCellClick;
+        _grid.CellFormatting += OnCellFormatting;
+        _grid.RowPostPaint += OnRowPostPaint;
+        _grid.CellMouseEnter += OnCellMouseEnter;
+        _grid.CellMouseLeave += OnCellMouseLeave;
         _settingsButton.Click += OnSettingsClick;
         _logoutButton.Click += OnLogoutClick;
         _cellCopy = new CellCopyService(new WinClipboard());
@@ -125,54 +154,76 @@ public sealed class DashboardView : UserControl
         split.SplitterDistance = Math.Clamp((int)(split.Width * 0.2), split.Panel1MinSize, upper);
     }
 
-    // 左栏装配：用户名标题 + 仓库筛选 + 对比选项 + 页脚（地址 / 设置·退出按钮 / 版本号）
+    // 左栏装配：用户名标题 + 数据操作按钮（刷新 / 导出）+ 底部会话区（地址 / 设置 / 退出登录 / 版本号）。
+    // 仓库与对比项已改为默认全量（工具栏做内存筛选），左栏专注操作入口，按钮纵向铺满、不挤角落。
     private void BuildFilterPanel(Control panel, string username)
     {
-        AddUserLabel(panel, username);
-        AddWarehouseSection(panel);
-        AddCompareSection(panel);
-        panel.Controls.Add(BuildFooter());
+        var root = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 6,
+            BackColor = Color.White,
+            Padding = new Padding(PadX, TitleTop, PadX, PadX)
+        };
+        root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 44F));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 42F));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 52F));
+        root.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+        root.Controls.Add(new Label
+        {
+            Text = username,
+            Font = Theme.DialogTitleFont,
+            ForeColor = Theme.Ink,
+            AutoSize = true,
+            Margin = new Padding(0)
+        }, 0, 0);
+        root.Controls.Add(new Label
+        {
+            Text = "数据操作",
+            Font = Theme.BodyFont,
+            ForeColor = Theme.Muted,
+            AutoSize = true,
+            Margin = new Padding(0, 12, 0, 8)
+        }, 0, 1);
+        root.Controls.Add(ConfigureActionButton(_refreshButton, primary: true), 0, 2);
+        root.Controls.Add(ConfigureActionButton(_exportButton, primary: false), 0, 3);
+        root.Controls.Add(BuildFooter(), 0, 5);
+        panel.Controls.Add(root);
     }
 
-    // 用户名标题（左栏顶部）
-    private static void AddUserLabel(Control panel, string username) => panel.Controls.Add(new Label
+    // 数据操作按钮统一外观：主操作蓝底、次操作白底，纵向铺满左栏可用宽度
+    private static Button ConfigureActionButton(Button button, bool primary)
     {
-        Text = username,
-        Font = Theme.DialogTitleFont,
-        ForeColor = Theme.Ink,
-        AutoSize = true,
-        Location = new Point(PadX, TitleTop)
-    });
+        if (primary)
+        {
+            Theme.StylePrimary(button, Theme.BodyFont);
+        }
+        else
+        {
+            Theme.StyleSecondary(button, Theme.BodyFont);
+        }
 
-    // 仓库筛选单选：全部（默认）/ 方仓 / 立库
-    private void AddWarehouseSection(Control panel)
-    {
-        panel.Controls.Add(Caption("仓库筛选", CaptionTop));
-        _allRadio.Location = new Point(PadX, WarehouseFirstTop);
-        _fcRadio.Location = new Point(PadX, WarehouseFirstTop + RowGap);
-        _asrsRadio.Location = new Point(PadX, WarehouseFirstTop + RowGap * 2);
-        panel.Controls.AddRange(new Control[] { _allRadio, _fcRadio, _asrsRadio });
+        button.Dock = DockStyle.Fill;
+        button.Margin = new Padding(0, 0, 0, 10);
+        return button;
     }
 
-    // 对比选项复选：冻结状态 / 过期日期
-    private void AddCompareSection(Control panel)
-    {
-        panel.Controls.Add(Caption("对比选项", OptionsCaptionTop));
-        _holdCheck.Location = new Point(PadX, OptionsFirstTop);
-        _expiryCheck.Location = new Point(PadX, OptionsFirstTop + RowGap);
-        panel.Controls.AddRange(new Control[] { _holdCheck, _expiryCheck });
-    }
-
-    // 页脚（停靠底部）：接口地址、设置/退出登录按钮行、版本号
+    // 会话区（左栏底部）：接口地址、设置/退出登录按钮行、版本号；随左栏宽度自适应、地址超宽自动换行
     private Control BuildFooter()
     {
         var footer = new FlowLayoutPanel
         {
-            Dock = DockStyle.Bottom,
+            Dock = DockStyle.Fill,
             FlowDirection = FlowDirection.TopDown,
+            WrapContents = false,
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            Padding = new Padding(PadX, 0, PadX, PadX),
+            Margin = new Padding(0, 8, 0, 0),
             BackColor = Color.Transparent
         };
 
@@ -184,7 +235,7 @@ public sealed class DashboardView : UserControl
             AutoSize = true,
             MaximumSize = new Size(AddressWrapWidth, 0)
         };
-        var sessionRow = BuildSessionButtonRow();
+        var sessionRow = BuildSessionRow();
         var version = new Label
         {
             Text = $"v{AppConfig.Version}",
@@ -196,17 +247,40 @@ public sealed class DashboardView : UserControl
         footer.Controls.Add(address);
         footer.Controls.Add(sessionRow);
         footer.Controls.Add(version);
-
-        // 窄窗适配：按页脚可用宽度约束地址与按钮行，超出时地址换行、按钮行折行，避免被裁剪看不见
         footer.Resize += (_, _) => FitFooterWidth(footer, address, sessionRow);
         return footer;
     }
 
-    // 将地址标签与按钮行的最大宽度对齐到页脚可用宽度：地址自动换行、按钮行按 WrapContents 折行。
-    // 仅 AutoSize 时按钮行不会折行（会被单行内容撑宽），必须靠 MaximumSize 才能触发 WrapContents。
+    // 设置 / 退出登录按钮行：等宽两列，随左栏宽度铺满
+    private Control BuildSessionRow()
+    {
+        Theme.StyleSecondary(_settingsButton, Theme.BodyFont);
+        Theme.StyleSecondary(_logoutButton, Theme.BodyFont);
+        _settingsButton.Dock = DockStyle.Fill;
+        _logoutButton.Dock = DockStyle.Fill;
+        _settingsButton.Margin = new Padding(0, 0, 4, 0);
+        _logoutButton.Margin = new Padding(4, 0, 0, 0);
+
+        var row = new TableLayoutPanel
+        {
+            ColumnCount = 2,
+            RowCount = 1,
+            Height = 36,
+            Width = AddressWrapWidth,
+            Margin = new Padding(0, 8, 0, 8),
+            BackColor = Color.Transparent
+        };
+        row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
+        row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
+        row.Controls.Add(_settingsButton, 0, 0);
+        row.Controls.Add(_logoutButton, 1, 0);
+        return row;
+    }
+
+    // 将地址标签与按钮行宽度对齐到左栏可用宽度：地址自动换行、按钮行铺满
     private static void FitFooterWidth(FlowLayoutPanel footer, Label address, Control sessionRow)
     {
-        var available = footer.ClientSize.Width - footer.Padding.Horizontal;
+        var available = footer.ClientSize.Width - footer.Margin.Horizontal;
         if (available <= 0)
         {
             return;
@@ -217,108 +291,196 @@ public sealed class DashboardView : UserControl
             address.MaximumSize = new Size(available, 0);
         }
 
-        if (sessionRow.MaximumSize.Width != available)
+        if (sessionRow.Width != available)
         {
-            sessionRow.MaximumSize = new Size(available, 0);
+            sessionRow.Width = available;
         }
     }
 
-    // F8「设置」「退出登录」按钮行：横向排列，窄窗可自动换行。
-    // 两个按钮 Margin 必须一致，否则默认 3px 边距会让上边缘错开、视觉不齐平；
-    // 整行左右边距取 3px，与上方地址/版本标签（同为默认 3px）左边线对齐，避免按钮相对标签外凸
-    private Control BuildSessionButtonRow()
-    {
-        Theme.StyleSecondary(_settingsButton, Theme.BodyFont);
-        Theme.StyleSecondary(_logoutButton, Theme.BodyFont);
-        _settingsButton.Margin = new Padding(0, 0, 8, 0);
-        _logoutButton.Margin = new Padding(0);
-
-        var row = new FlowLayoutPanel
-        {
-            FlowDirection = FlowDirection.LeftToRight,
-            AutoSize = true,
-            AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            WrapContents = true,
-            Margin = new Padding(3, 10, 3, 10),
-            BackColor = Color.Transparent
-        };
-        row.Controls.Add(_settingsButton);
-        row.Controls.Add(_logoutButton);
-        return row;
-    }
-
-    // 分组小标题：左栏统一左间距
-    private static Label Caption(string text, int y) => new()
-    {
-        Text = text,
-        Font = Theme.BodyFont,
-        ForeColor = Theme.Muted,
-        AutoSize = true,
-        Location = new Point(PadX, y)
-    };
-
-    // 右栏装配：顶部标题与按钮、底部状态行、中部数据表格
+    // 右栏装配：用 TableLayoutPanel 固定五行（标题 / 工具栏 / 统计 / 表格 / 状态栏）。
+    // 单元格天然不重叠，不依赖停靠顺序与 z 序，彻底避免顶部统计条被 Dock=Fill 的表格遮盖；
+    // 窗口拉伸时仅表格行（Percent 100）变高。
     private void BuildDataPanel(Control panel)
     {
-        var header = BuildDataHeader();
-        var status = BuildStatusBar();
-        BuildGridHost();
+        var root = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 5,
+            BackColor = Color.White
+        };
+        root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, TitleBarHeight));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, ToolbarHeight));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, StatsHeight));
+        root.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, StatusHeight));
 
-        // 填充区先加入，Top/Bottom 后加入，确保表格占据中部剩余空间
-        panel.Controls.Add(_gridHost);
-        panel.Controls.Add(header);
-        panel.Controls.Add(status);
+        BuildGridHost();
+        root.Controls.Add(BuildTitleBar(), 0, 0);
+        root.Controls.Add(BuildToolStrip(), 0, 1);
+        root.Controls.Add(BuildStatsPanel(), 0, 2);
+        root.Controls.Add(_gridHost, 0, 3);
+        root.Controls.Add(BuildStatusBar(), 0, 4);
+        panel.Controls.Add(root);
         CenterEmptyLabel();
     }
 
-    // 顶栏：标题 + 刷新 / 导出按钮（按钮右对齐，随宿主宽度重算位置）
-    private Panel BuildDataHeader()
+    // 标题栏：页面标题
+    private static Control BuildTitleBar()
     {
-        var header = new Panel { Dock = DockStyle.Top, Height = 56, BackColor = Color.White };
-        header.Controls.Add(new Label
+        var bar = new Panel { Dock = DockStyle.Fill, BackColor = Color.White };
+        bar.Controls.Add(new Label
         {
             Text = "差异明细",
             Font = Theme.PageTitleFont,
             ForeColor = Theme.Ink,
             AutoSize = true,
-            Location = new Point(PadX, HeaderButtonTop)
+            Location = new Point(PadX, 8)
         });
-
-        Theme.StylePrimary(_refreshButton, Theme.BodyFont);
-        _refreshButton.Size = new Size(96, 32);
-        Theme.StyleSecondary(_exportButton, Theme.BodyFont);
-        _exportButton.Size = new Size(96, 32);
-        header.Controls.Add(_refreshButton);
-        header.Controls.Add(_exportButton);
-        header.Resize += (_, _) => PlaceHeaderButtons(header);
-        PlaceHeaderButtons(header);
-        return header;
+        return bar;
     }
 
-    // 顶栏按钮靠右排布：刷新最右、导出在其左侧；窄窗时回退左间距，避免坐标为负越出可视区
-    private void PlaceHeaderButtons(Panel header)
+    // 工具栏：仓库类型筛选 / 异常类型筛选（均为内存投影，切换不触发接口请求）；数据操作按钮移至左栏
+    private ToolStrip BuildToolStrip()
     {
-        _refreshButton.Location =
-            new Point(Math.Max(PadX, header.Width - _refreshButton.Width - PadX), HeaderButtonTop);
-        _exportButton.Location =
-            new Point(Math.Max(PadX, _refreshButton.Left - _exportButton.Width - 12), HeaderButtonTop);
-    }
-
-    // 底栏：状态文字与记录数
-    private FlowLayoutPanel BuildStatusBar()
-    {
-        var status = new FlowLayoutPanel
+        var strip = new ToolStrip
         {
-            Dock = DockStyle.Bottom,
-            Height = 34,
-            Padding = new Padding(PadX, 8, 0, 0),
+            Dock = DockStyle.Fill,
+            AutoSize = false,
+            GripStyle = ToolStripGripStyle.Hidden,
+            BackColor = Color.White,
+            Font = Theme.FilterFont,
+            Padding = new Padding(PadX - 8, 4, PadX, 4)
+        };
+
+        StyleFilterCombo(_warehouseFilter, 150);
+        StyleFilterCombo(_diffTypeFilter, 190);
+        _diffTypeFilter.Items.AddRange(DiffTypeLabels);
+        _diffTypeFilter.SelectedIndex = 0;
+        _diffTypeFilter.SelectedIndexChanged += OnFilterChanged;
+        _warehouseFilter.Items.AddRange(WarehouseLabels);
+        _warehouseFilter.SelectedIndex = 0;
+        _warehouseFilter.SelectedIndexChanged += OnFilterChanged;
+
+        strip.Items.Add(FilterLabel("仓库类型"));
+        strip.Items.Add(_warehouseFilter);
+        strip.Items.Add(FilterLabel("异常类型"));
+        strip.Items.Add(_diffTypeFilter);
+        return strip;
+    }
+
+    // 筛选标签：加大字号与颜色对比，统一右侧间距
+    private static ToolStripLabel FilterLabel(string text) => new(text)
+    {
+        Font = Theme.FilterFont,
+        ForeColor = Theme.Subtle,
+        Margin = new Padding(0, 0, 8, 0)
+    };
+
+    // 筛选下拉：加大宽度与字号（高度随字号增大），右侧留出组间距
+    private static void StyleFilterCombo(ToolStripComboBox combo, int width)
+    {
+        combo.AutoSize = false;
+        combo.Width = width;
+        combo.Font = Theme.FilterFont;
+        combo.Margin = new Padding(0, 0, 28, 0);
+    }
+
+    // 统计摘要：差异物料数卡片 + 异常种类图例
+    private Control BuildStatsPanel()
+    {
+        var panel = new Panel
+        {
+            Dock = DockStyle.Fill,
+            BackColor = Color.White,
+            Padding = new Padding(PadX, 8, PadX, 8)
+        };
+        var table = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 2,
+            RowCount = 1,
             BackColor = Color.White
         };
-        _countLabel.Margin = new Padding(24, 0, 0, 0);
-        status.Controls.Add(_statusLabel);
-        status.Controls.Add(_countLabel);
+        table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 200F));
+        table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        table.Controls.Add(BuildStatsCard("差异物料数", _statDiffValue, Theme.Error), 0, 0);
+        table.Controls.Add(BuildLegend(), 1, 0);
+        panel.Controls.Add(table);
+        return panel;
+    }
+
+    // 统计卡片：小标题 + 大字号数值
+    private static Panel BuildStatsCard(string caption, Label value, Color valueColor)
+    {
+        value.Text = "-";
+        value.Font = Theme.StatValueFont;
+        value.ForeColor = valueColor;
+        value.AutoSize = true;
+        value.Location = new Point(14, 34);
+
+        var card = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Canvas, Margin = new Padding(0, 0, 12, 0) };
+        card.Controls.Add(new Label
+        {
+            Text = caption,
+            Font = Theme.StatCaptionFont,
+            ForeColor = Theme.Muted,
+            AutoSize = true,
+            Location = new Point(14, 12)
+        });
+        card.Controls.Add(value);
+        return card;
+    }
+
+    // 异常种类图例：与表格异常种类列同色，单行横排便于对照（窄窗自动折行）
+    private static Control BuildLegend()
+    {
+        var legend = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = true,
+            BackColor = Color.White,
+            Padding = new Padding(8, 8, 0, 0)
+        };
+        legend.Controls.Add(LegendItem("数量差异", GridTheme.KindQuantityInk));
+        legend.Controls.Add(LegendItem("储位差异", GridTheme.KindLocationInk));
+        legend.Controls.Add(LegendItem("冻结差异", GridTheme.KindHoldInk));
+        legend.Controls.Add(LegendItem("效期差异", GridTheme.KindExpiryInk));
+        return legend;
+    }
+
+    // 图例单元：同色方块 + 文案（横排右间距）
+    private static Label LegendItem(string text, Color color) => new()
+    {
+        Text = "■ " + text,
+        ForeColor = color,
+        Font = Theme.StatCaptionFont,
+        AutoSize = true,
+        Margin = new Padding(0, 0, 16, 2)
+    };
+
+    // 状态栏：消息 / 行数 / 筛选条件 / 耗时 / 更新时间
+    private StatusStrip BuildStatusBar()
+    {
+        var status = new StatusStrip { Dock = DockStyle.Fill, BackColor = Color.White, SizingGrip = false };
+        _filterLabel.Spring = true;
+        _filterLabel.TextAlign = ContentAlignment.MiddleLeft;
+
+        status.Items.Add(_statusLabel);
+        status.Items.Add(Divider());
+        status.Items.Add(_countLabel);
+        status.Items.Add(Divider());
+        status.Items.Add(_filterLabel);
+        status.Items.Add(_elapsedLabel);
+        status.Items.Add(Divider());
+        status.Items.Add(_updatedLabel);
         return status;
     }
+
+    // 状态栏分隔符
+    private static ToolStripStatusLabel Divider() => new() { Text = "|", ForeColor = Theme.Line };
 
     // 中部：表格 + 空数据提示浮层
     private void BuildGridHost()
@@ -341,20 +503,14 @@ public sealed class DashboardView : UserControl
         _grid.AllowUserToDeleteRows = false;
         _grid.AllowUserToResizeRows = false;
         _grid.RowHeadersVisible = false;
-        _grid.SelectionMode = DataGridViewSelectionMode.CellSelect;
         _grid.MultiSelect = false;
         _grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None;
         _grid.AllowUserToResizeColumns = true;
         _grid.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.AutoSize;
-        _grid.BackgroundColor = Color.White;
-        _grid.BorderStyle = BorderStyle.None;
-        _grid.EnableHeadersVisualStyles = false;
         _grid.ColumnHeadersDefaultCellStyle = new DataGridViewCellStyle
         {
             Alignment = DataGridViewContentAlignment.MiddleCenter,
-            WrapMode = DataGridViewTriState.True,
-            BackColor = Theme.SecondaryHover,
-            ForeColor = Theme.Ink
+            WrapMode = DataGridViewTriState.True
         };
 
         foreach (var column in TableColumns.Columns)
@@ -372,6 +528,9 @@ public sealed class DashboardView : UserControl
                 }
             });
         }
+
+        // 统一外观：字体、行高、表头、网格线、选择样式与双缓冲
+        _grid.ApplyGridLook();
     }
 
     // 把拉取结果投影为表格模型并逐格填充；不用 DataSource，空值与对齐完全由列定义决定
@@ -386,14 +545,17 @@ public sealed class DashboardView : UserControl
 
         // 批量填充：填充期间把列宽模式降为 None 并挂起布局，避免「每加一行就重算整表列宽」的 O(n²) 开销；
         // 填充后一次性恢复 AllCells，列宽最终结果与逐行填充完全一致。
+        _hoverRow = -1;
         SetColumnAutoSize(DataGridViewAutoSizeColumnMode.None);
         _grid.SuspendLayout();
         try
         {
             _grid.Rows.Clear();
-            foreach (var cells in model.Rows)
+            // 每行挂载渲染元数据（分类/严重度/成对不一致掩码），CellFormatting 只做 O(1) 查表
+            for (var i = 0; i < model.Rows.Count; i++)
             {
-                _grid.Rows.Add((object[])cells);
+                var index = _grid.Rows.Add((object[])model.Rows[i]);
+                _grid.Rows[index].Tag = GridStyler.BuildMeta(rows[i]);
             }
         }
         finally
@@ -402,8 +564,36 @@ public sealed class DashboardView : UserControl
             SetColumnAutoSize(DataGridViewAutoSizeColumnMode.AllCells);
         }
 
-        _emptyLabel.Text = NoDataText;
-        _emptyLabel.Visible = model.IsEmpty;
+        ShowOverlay(model.IsEmpty ? EmptyOverlayText() : null);
+    }
+
+    // 空状态浮层文案：无数据 → 提示刷新；有数据但筛选后无差异 → 一致性/筛选提示
+    private string EmptyOverlayText()
+    {
+        if (Rows.Count == 0)
+        {
+            return "暂无数据，请点击“刷新数据”";
+        }
+
+        return HasViewFilter()
+            ? "当前筛选条件下未发现差异"
+            : "未发现差异，数据一致";
+    }
+
+    // 是否存在生效的视图筛选（仓库类型 / 异常类型）
+    private bool HasViewFilter() => SelectedDiffKind() is not null || SelectedWarehouseCode() is not null;
+
+    // 浮层显示：text 为 null 时隐藏；否则显示并居中
+    private void ShowOverlay(string? text)
+    {
+        if (text is null)
+        {
+            _emptyLabel.Visible = false;
+            return;
+        }
+
+        _emptyLabel.Text = text;
+        _emptyLabel.Visible = true;
         CenterEmptyLabel();
     }
 
@@ -435,26 +625,30 @@ public sealed class DashboardView : UserControl
         previous?.Cancel();
 
         SetBusy(true);
+        _loadStopwatch.Restart();
         _statusLabel.ForeColor = Theme.Muted;
         _statusLabel.Text = "正在同步数据...";
 
         try
         {
+            // 固定全量口径：仓库=全部、对比冻结与效期均开启；细粒度筛选改由工具栏内存投影完成
             var rows = await _client.FetchStockDiffAsync(
-                CurrentWarehouse(), _holdCheck.Checked, _expiryCheck.Checked, cts.Token);
+                Converters.WarehouseCodeFromLabel(Converters.LabelAll),
+                compareHold: true,
+                compareExpiry: true,
+                cts.Token);
             if (cts.IsCancellationRequested)
             {
                 return;
             }
 
+            _loadStopwatch.Stop();
             Rows = rows;
-            PopulateGrid(rows);
-            UpdateExportEnabled();
-            _countLabel.Text = $"{rows.Count} 条记录";
+            ApplyViewFilter();
             // 固定区域性：避免自定义格式串受当前区域性日历影响（非公历系统下时间显示异常）
-            _statusLabel.Text = rows.Count > 0
-                ? $"更新时间: {DateTime.Now.ToString(TimeFormat, CultureInfo.InvariantCulture)}"
-                : NoDataText;
+            _updatedLabel.Text = $"更新: {DateTime.Now.ToString(TimeFormat, CultureInfo.InvariantCulture)}";
+            _elapsedLabel.Text = $"耗时: {_loadStopwatch.ElapsedMilliseconds} ms";
+            _statusLabel.Text = rows.Count > 0 ? "查询完成" : NoDataText;
         }
         catch (OperationCanceledException)
         {
@@ -471,9 +665,11 @@ public sealed class DashboardView : UserControl
         catch (Exception ex)
         {
             Trace.WriteLine($"[数据查询] 失败: {ex}");
+            _loadStopwatch.Stop();
             _statusLabel.ForeColor = Theme.Error;
             _statusLabel.Text = "数据获取失败";
             UpdateExportEnabled();
+            ShowOverlay(_viewRows.Count == 0 ? "数据获取失败" : null);
             MessageBox.Show(this, ex.Message, "数据获取失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
         finally
@@ -487,6 +683,114 @@ public sealed class DashboardView : UserControl
 
             cts.Dispose();
         }
+    }
+
+    // 逐格格式化：差异分级底色、悬停高亮、成对不一致单元格、差异数量与异常种类强调（逻辑收口在 GridStyler）
+    private void OnCellFormatting(object? sender, DataGridViewCellFormattingEventArgs e) =>
+        _grid.FormatCell(e, _hoverRow);
+
+    // 选中行左侧主题色竖条（非绑定表格无 DataSource，RowPostPaint 可用）
+    private void OnRowPostPaint(object? sender, DataGridViewRowPostPaintEventArgs e) =>
+        _grid.PaintRowChrome(e);
+
+    // 悬停进入：记录行号并只重绘变化的两行，避免整表重绘
+    private void OnCellMouseEnter(object? sender, DataGridViewCellEventArgs e) => SetHoverRow(e.RowIndex);
+
+    // 悬停离开：清空悬停行并重绘上一行
+    private void OnCellMouseLeave(object? sender, DataGridViewCellEventArgs e) => SetHoverRow(-1);
+
+    // 更新悬停行：相同则跳过，否则重绘旧行与新行
+    private void SetHoverRow(int rowIndex)
+    {
+        if (_hoverRow == rowIndex)
+        {
+            return;
+        }
+
+        var previous = _hoverRow;
+        _hoverRow = rowIndex;
+        InvalidateRow(previous);
+        InvalidateRow(rowIndex);
+    }
+
+    // 安全重绘指定行：越界或视图/表格已释放时跳过
+    private void InvalidateRow(int rowIndex)
+    {
+        if (IsDisposed || _grid.IsDisposed || rowIndex < 0 || rowIndex >= _grid.Rows.Count)
+        {
+            return;
+        }
+
+        _grid.InvalidateRow(rowIndex);
+    }
+
+    // 筛选变更：仓库类型 / 异常类型，仅做内存投影，不触发接口请求
+    private void OnFilterChanged(object? sender, EventArgs e)
+    {
+        if (IsDisposed)
+        {
+            return;
+        }
+
+        ApplyViewFilter();
+    }
+
+    // 由 Rows 按筛选条件（仓库类型 / 异常类型）投影视图，并刷新表格、统计摘要、状态栏与导出口径；纯内存，不触发接口请求
+    private void ApplyViewFilter()
+    {
+        var kind = SelectedDiffKind();
+        var warehouseCode = SelectedWarehouseCode();
+        var view = new List<StockDiffRow>(Rows.Count);
+        foreach (var row in Rows)
+        {
+            if (kind is not null && DiffClassifier.Classify(row) != kind)
+            {
+                continue;
+            }
+
+            if (warehouseCode is not null
+                && !string.Equals(row.WarehouseType, warehouseCode, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            view.Add(row);
+        }
+
+        _viewRows = view;
+        PopulateGrid(view);
+        UpdateStats(view);
+        UpdateStatusFilter();
+        _countLabel.Text = $"{view.Count} 行 / 共 {Rows.Count} 行";
+        UpdateExportEnabled();
+    }
+
+    // 当前选中的异常类型分类；首项「全部类型」返回 null
+    private DiffKind? SelectedDiffKind()
+    {
+        var index = _diffTypeFilter.SelectedIndex;
+        return index >= 0 && index < DiffTypeKinds.Length ? DiffTypeKinds[index] : null;
+    }
+
+    // 当前选中的仓库代码；首项「全部仓库」返回 null
+    private string? SelectedWarehouseCode()
+    {
+        var index = _warehouseFilter.SelectedIndex;
+        return index >= 0 && index < WarehouseCodes.Length ? WarehouseCodes[index] : null;
+    }
+
+    // 统计摘要：差异物料数 = 当前视图总条数（列表本身即差异数据）
+    private void UpdateStats(IReadOnlyList<StockDiffRow> view)
+    {
+        _statDiffValue.Text = view.Count.ToString(CultureInfo.InvariantCulture);
+    }
+
+    // 状态栏筛选条件文字：汇总仓库类型 / 异常类型（对比项与仓库已固定为全量）
+    private void UpdateStatusFilter()
+    {
+        var kind = _diffTypeFilter.SelectedItem?.ToString() ?? DiffTypeLabels[0];
+        var warehouse = _warehouseFilter.SelectedItem?.ToString() ?? WarehouseLabels[0];
+        _filterLabel.Text = $"筛选 仓库: {warehouse} | 异常: {kind}";
     }
 
     // 单元格点击复制：表头点击（RowIndex/ColumnIndex 为负）忽略；空值不写剪贴板；失败仅提示并记日志
@@ -570,7 +874,7 @@ public sealed class DashboardView : UserControl
         {
             Filter = "CSV 文件|*.csv",
             DefaultExt = "csv",
-            FileName = CsvExporter.BuildDefaultFileName(CurrentWarehouseLabel())
+            FileName = CsvExporter.BuildDefaultFileName(Converters.LabelAll)
         };
         return dialog.ShowDialog(this) == DialogResult.OK ? dialog.FileName : null;
     }
@@ -640,19 +944,36 @@ public sealed class DashboardView : UserControl
         _mainForm.ShowLogin();
     }
 
-    // 当前仓库筛选的中文标签，供导出默认文件名复用（不改变请求代码口径）
-    private string CurrentWarehouseLabel() =>
-        _fcRadio.Checked ? FcLabel : _asrsRadio.Checked ? AsrsLabel : AllLabel;
-
     // 导出可用性统一由最近一次拉取结果决定：有数据才可导出（刷新成功/失败两处共用）
-    private void UpdateExportEnabled() => _exportButton.Enabled = Rows.Count > 0;
+    private void UpdateExportEnabled()
+    {
+        if (!IsDisposed)
+        {
+            _exportButton.Enabled = Rows.Count > 0;
+        }
+    }
 
-    // 读取仓库单选的接口代码：由标签经 Core 转换器派生代码口径，与默认文件名共用同一判断
-    private string CurrentWarehouse() => Converters.WarehouseCodeFromLabel(CurrentWarehouseLabel());
+    // 请求期间禁用交互并显示等待光标；刷新按钮与筛选项禁用，导出按数据可用性联动
+    private void SetBusy(bool busy)
+    {
+        UiHelper.SetBusy(this, busy, this, _refreshButton);
+        if (IsDisposed)
+        {
+            return;
+        }
 
-    // 请求期间禁用刷新与筛选项并显示等待光标，避免重复触发（实现收口在 UiHelper）
-    private void SetBusy(bool busy) =>
-        UiHelper.SetBusy(this, busy, this, _refreshButton, _allRadio, _fcRadio, _asrsRadio, _holdCheck, _expiryCheck);
+        _diffTypeFilter.Enabled = !busy;
+        _warehouseFilter.Enabled = !busy;
+        if (busy)
+        {
+            _exportButton.Enabled = false;
+            ShowOverlay(LoadingText);
+        }
+        else
+        {
+            UpdateExportEnabled();
+        }
+    }
 
     // 视图销毁时取消在途请求，避免回调触碰已释放控件
     protected override void Dispose(bool disposing)
