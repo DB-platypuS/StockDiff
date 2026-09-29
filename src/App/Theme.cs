@@ -37,6 +37,10 @@ internal static class Theme
     public static readonly Font StatCaptionFont = new("Microsoft YaHei UI", 9F);
     public static readonly Font StatValueFont = new("Microsoft YaHei UI", 16F, FontStyle.Bold);
 
+    // 状态浮层字体：大号图标与中等标题（空数据 / 加载中 / 获取失败共用）
+    public static readonly Font OverlayIconFont = new("Microsoft YaHei UI", 30F);
+    public static readonly Font OverlayTitleFont = new("Microsoft YaHei UI", 12.5F, FontStyle.Bold);
+
     // 筛选栏字体：工具栏标签与下拉框，加大字号便于阅读（下拉高度随字号增大）
     public static readonly Font FilterFont = new("Microsoft YaHei UI", 11F);
 

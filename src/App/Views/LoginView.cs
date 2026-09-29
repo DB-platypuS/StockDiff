@@ -31,20 +31,19 @@ public sealed class LoginView : UserControl
     {
         BorderStyle = BorderStyle.None,
         Dock = DockStyle.Fill,
+        Margin = new Padding(0),
         UseSystemPasswordChar = true,
         PlaceholderText = "密码"
     };
 
-    // 显示/隐藏密码切换：内嵌在密码框描边容器右侧，避免明文密码长期暴露
+    // 显示/隐藏密码切换：内嵌在密码框描边容器右侧的独立单元格中；自绘眼睛图标，不依赖字体字形粗细，
+    // 用 2px 粗笔绘制保证清晰可见；放在 TableLayoutPanel 固定宽度列内，与密码框物理隔离不被遮挡
     private readonly Button _togglePasswordButton = new()
     {
-        Text = "显示",
-        Dock = DockStyle.Right,
-        Width = 44,
+        Dock = DockStyle.Fill,
+        Margin = new Padding(0),
         FlatStyle = FlatStyle.Flat,
         BackColor = Color.White,
-        ForeColor = Theme.Muted,
-        Font = Theme.BodyFont,
         Cursor = Cursors.Hand,
         TabStop = false
     };
@@ -75,6 +74,7 @@ public sealed class LoginView : UserControl
         Theme.StyleSecondary(_settingsButton, Theme.BodyFont, wideHitArea: true);
         _togglePasswordButton.FlatAppearance.BorderSize = 0;
         _togglePasswordButton.FlatAppearance.MouseOverBackColor = Theme.SecondaryHover;
+        _togglePasswordButton.Paint += OnTogglePasswordPaint;
 
         var card = BuildCard();
         var host = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Canvas };
@@ -175,21 +175,76 @@ public sealed class LoginView : UserControl
     private static Panel MakeInput(TextBox box) =>
         Theme.MakeInput(box, new Padding(10, 9, 10, 9), new Size(InputWidth, 38), new Padding(0, 0, 0, 12));
 
-    // 密码输入：描边容器右侧内嵌切换按钮，右侧内边距收窄给按钮留位；
-    // 先由 Theme 加入 Dock=Fill 的密码框、再追加 Dock=Right 的按钮，布局时按钮先占右边、密码框填充剩余
+    // 密码输入：用 TableLayoutPanel 把密码框（自适应列）与切换按钮（固定 38px 列）分到两个单元格，
+    // 彻底避免 Dock=Fill 的文本框覆盖按钮；外层仍是带圆角描边的容器
     private Panel MakePasswordInput()
     {
-        var wrap = Theme.MakeInput(
-            _passwordBox, new Padding(10, 9, 6, 9), new Size(InputWidth, 38), new Padding(0, 0, 0, 12));
-        wrap.Controls.Add(_togglePasswordButton);
+        var wrap = new Panel
+        {
+            BackColor = Color.White,
+            Padding = new Padding(10, 9, 8, 9),
+            Size = new Size(InputWidth, 38),
+            Margin = new Padding(0, 0, 0, 12)
+        };
+        wrap.Paint += (_, e) =>
+        {
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            using var pen = new Pen(Theme.Line);
+            using var path = Theme.RoundRect(new Rectangle(0, 0, wrap.Width - 1, wrap.Height - 1), 6);
+            e.Graphics.DrawPath(pen, path);
+        };
+
+        var table = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 2,
+            RowCount = 1,
+            BackColor = Color.White
+        };
+        table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 38F));
+        table.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+
+        table.Controls.Add(_passwordBox, 0, 0);
+        table.Controls.Add(_togglePasswordButton, 1, 0);
+        wrap.Controls.Add(table);
         return wrap;
     }
 
-    // 切换密码明文显示：只改变掩码方式，不清空已输入内容
+    // 切换密码明文显示：只改变掩码方式，不清空已输入内容；重绘按钮切换眼睛图标（遮蔽→睁眼；明文→划掉）
     private void TogglePassword()
     {
         _passwordBox.UseSystemPasswordChar = !_passwordBox.UseSystemPasswordChar;
-        _togglePasswordButton.Text = _passwordBox.UseSystemPasswordChar ? "显示" : "隐藏";
+        _togglePasswordButton.Invalidate();
+    }
+
+    // 自绘密码切换按钮图标：用 2px 粗笔在按钮中心绘制眼睛（睁眼 = 椭圆框 + 瞳孔；划掉 = 再叠加一条斜线）
+    private void OnTogglePasswordPaint(object? sender, PaintEventArgs e)
+    {
+        var g = e.Graphics;
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        g.Clear(_togglePasswordButton.BackColor);
+
+        var bounds = _togglePasswordButton.ClientRectangle;
+        var cx = bounds.Width / 2f;
+        var cy = bounds.Height / 2f;
+        var eyeW = 16f;
+        var eyeH = 10f;
+
+        using var pen = new Pen(Theme.Subtle, 2f);
+        using var pupil = new SolidBrush(Theme.Subtle);
+
+        // 眼睛外框：水平椭圆
+        g.DrawEllipse(pen, cx - eyeW / 2, cy - eyeH / 2, eyeW, eyeH);
+        // 瞳孔：中心实心圆
+        g.FillEllipse(pupil, cx - 2.5f, cy - 2.5f, 5f, 5f);
+
+        // 明文状态：叠加一条从左上到右下的斜线，表示"已显示 / 点击遮蔽"
+        if (!_passwordBox.UseSystemPasswordChar)
+        {
+            var r = eyeW / 2 + 2;
+            g.DrawLine(pen, cx - r, cy - r * 0.6f, cx + r, cy + r * 0.6f);
+        }
     }
 
     // 「API 设置」：打开接口地址对话框；保存成功后刷新地址展示并提示重新登录
@@ -245,47 +300,6 @@ public sealed class LoginView : UserControl
         card.Top = Math.Max(0, (host.ClientSize.Height - card.Height) / 2);
     }
 
-    // 自绘圆角卡片面板：开启双层缓冲避免闪烁，尺寸退化时跳过 Region 与描边
-    private sealed class CardPanel : Panel
-    {
-        public CardPanel()
-        {
-            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint
-                | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
-            BackColor = Color.White;
-        }
-
-        // 尺寸变化时重建圆角 Region，使卡片边缘保持圆角
-        protected override void OnResize(EventArgs e)
-        {
-            base.OnResize(e);
-            if (Width <= 2 || Height <= 2)
-            {
-                return;
-            }
-
-            var previous = Region;
-            using var path = Theme.RoundRect(new Rectangle(0, 0, Width - 1, Height - 1), 12);
-            Region = new Region(path);
-            previous?.Dispose();
-        }
-
-        // 先填充背景色，再绘制浅灰圆角描边
-        protected override void OnPaint(PaintEventArgs e)
-        {
-            e.Graphics.Clear(BackColor);
-            if (Width <= 2 || Height <= 2)
-            {
-                return;
-            }
-
-            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-            using var path = Theme.RoundRect(new Rectangle(0, 0, Width - 1, Height - 1), 12);
-            using var pen = new Pen(Theme.Line);
-            e.Graphics.DrawPath(pen, path);
-        }
-    }
-
     // 登录按钮处理：本地校验空输入 → 禁用控件防重入 → 调用 ApiClient 登录
     // 成功切换主面板；失败记录日志并用弹窗提示，最后恢复控件状态
     private async void OnLoginClick(object? sender, EventArgs e)
@@ -322,6 +336,22 @@ public sealed class LoginView : UserControl
         {
             SetBusy(false);
         }
+    }
+
+    // 快捷键：回车直接登录（焦点在账号或密码框均可）；忙碌时忽略，避免重复提交
+    protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+    {
+        if (keyData == Keys.Enter)
+        {
+            if (_loginButton.Enabled)
+            {
+                OnLoginClick(_loginButton, EventArgs.Empty);
+            }
+
+            return true;
+        }
+
+        return base.ProcessCmdKey(ref msg, keyData);
     }
 
     // 销毁视图时取消在途登录请求；只取消不 Dispose，避免与在途请求的令牌注册产生释放竞态
